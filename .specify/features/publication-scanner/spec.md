@@ -21,6 +21,132 @@ The system runs as a scheduled CLI invocation — it is **not** a long-running s
 
 ---
 
+## Domain Configuration — Initial Interest Areas
+
+The user profile supports structured boolean search queries that define areas of interest. Each query combines a **base topic** with **specialization facets** using AND/OR operators. The system uses these queries for two purposes: (a) constructing API search queries for sources that support structured search (arXiv, Semantic Scholar), and (b) feeding the LLM scorer with domain context for relevance assessment.
+
+### Default Domain Queries (v1 Profile)
+
+The following queries represent the initial areas of interest. Each is a standalone domain that the system evaluates independently — a publication matching **any one** domain is considered a candidate.
+
+| # | Domain Label | Structured Query |
+|---|---|---|
+| D1 | **LLM Disaggregated Inference** | `("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("disaggregated inference" OR "prefill" OR "decode" OR "KV cache")` |
+| D2 | **Inference Performance Modeling** | `("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("performance modeling" OR "analytical model" OR roofline)` |
+| D3 | **Inference Cost Efficiency** | `("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("performance per dollar" OR "cost efficiency" OR TCO OR "efficiency")` |
+| D4 | **Low-Precision & Quantization** | `("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("low precision" OR FP8 OR BF16 OR INT8 OR quantization)` |
+| D5 | **Efficient Compute Kernels** | `("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("efficient kernels" OR "attention kernels" OR GEMM)` |
+| D6 | **RL-Based Code & Kernel Generation** | `("large language model" OR LLM OR transformer) AND ("reinforcement learning" OR "RL-based" OR "learned code generation")` |
+
+### Query Semantics
+
+- **OR** within parentheses: synonyms / alternative phrasings — any match satisfies the clause.
+- **AND** between clauses: all clauses must be present (in title, abstract, or keywords) for a positive match.
+- The **base topic** (`"large language model" OR LLM OR transformer`) AND (`inference OR serving`) is shared across D1–D5, ensuring all results are grounded in LLM inference. D6 broadens to RL-based generation without requiring the inference facet.
+- Queries are stored in `profile.yaml` under `domains[].query` and are **user-editable** — users can add, modify, or remove domains at any time via `pubscout init` or direct YAML editing.
+- The scoring pipeline uses domain queries in two ways:
+  1. **Keyword pre-filter**: Boolean evaluation against title + abstract text (fast, no LLM cost).
+  2. **LLM context**: Matched domain labels and queries are passed to the LLM scorer as "the user is interested in: {domain_label}" to guide relevance assessment.
+
+### Profile YAML Example
+
+```yaml
+domains:
+  - label: "LLM Disaggregated Inference"
+    query: '("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("disaggregated inference" OR "prefill" OR "decode" OR "KV cache")'
+    enabled: true
+  - label: "Inference Performance Modeling"
+    query: '("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("performance modeling" OR "analytical model" OR roofline)'
+    enabled: true
+  - label: "Inference Cost Efficiency"
+    query: '("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("performance per dollar" OR "cost efficiency" OR TCO OR "efficiency")'
+    enabled: true
+  - label: "Low-Precision & Quantization"
+    query: '("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("low precision" OR FP8 OR BF16 OR INT8 OR quantization)'
+    enabled: true
+  - label: "Efficient Compute Kernels"
+    query: '("large language model" OR LLM OR transformer) AND (inference OR serving) AND ("efficient kernels" OR "attention kernels" OR GEMM)'
+    enabled: true
+  - label: "RL-Based Code & Kernel Generation"
+    query: '("large language model" OR LLM OR transformer) AND ("reinforcement learning" OR "RL-based" OR "learned code generation")'
+    enabled: true
+```
+
+---
+
+## Source Configuration — Default Sources
+
+The system ships with pre-configured default sources that map well to the domain queries above. Users can enable/disable defaults and add arbitrary URLs during `init` or at any time via `pubscout sources`.
+
+### S1: arXiv (Default — Enabled)
+
+| Property | Value |
+|---|---|
+| **Label** | arXiv |
+| **Type** | API |
+| **Base URL** | `http://export.arxiv.org/api/query` |
+| **Adapter** | `ArxivAdapter` — uses the arXiv Search API (Atom XML responses) |
+| **Python client** | `arxiv` PyPI package (handles pagination, rate limiting, result parsing) |
+| **Auth** | None required (public API) |
+| **Rate limits** | 3-second delay between requests (courtesy, not enforced). Max 2,000 results per page, 30,000 per query. |
+| **Query mapping** | Domain boolean queries are translated to arXiv query syntax: `ti:` (title), `abs:` (abstract), `cat:` (category). OR/AND operators supported natively. |
+| **Sort** | `sortBy=submittedDate&sortOrder=descending` for daily scans (newest first) |
+| **Pagination** | `start` + `max_results` parameters; fetch in pages of 100 |
+| **Dedup key** | arXiv ID (e.g., `2401.12345`) — globally unique, preferred over DOI for arXiv papers |
+
+**Relevant arXiv categories** (pre-configured as category filters to reduce noise):
+
+| Category | Name | Why relevant |
+|---|---|---|
+| `cs.LG` | Machine Learning | LLM architectures, quantization, inference optimization |
+| `cs.AI` | Artificial Intelligence | AI system design, agent frameworks |
+| `cs.DC` | Distributed Computing | Distributed inference, model parallelism, serving systems |
+| `cs.PF` | Performance | Benchmarking, throughput/latency modeling, accelerator evaluation |
+| `cs.AR` | Hardware Architecture | Custom accelerators, ASIC/FPGA for inference |
+| `cs.CL` | Computation & Language | NLP/LLM core research, decoding strategies |
+
+**arXiv query construction example** (for domain D1 — LLM Disaggregated Inference):
+```
+search_query=(cat:cs.LG OR cat:cs.AI OR cat:cs.DC OR cat:cs.PF OR cat:cs.AR OR cat:cs.CL)
+  AND (ti:"large language model" OR ti:LLM OR ti:transformer)
+  AND (abs:inference OR abs:serving)
+  AND (abs:"disaggregated inference" OR abs:prefill OR abs:decode OR abs:"KV cache")
+&sortBy=submittedDate&sortOrder=descending&max_results=100
+```
+
+**Daily scan strategy**:
+1. Query each domain (D1–D6) separately against arXiv API with category filters.
+2. Merge results, deduplicate by arXiv ID.
+3. Filter to papers submitted within the last 24 hours (or since last scan timestamp).
+4. Pass candidates to the scoring pipeline.
+
+### Profile YAML — Source Entry Example
+
+```yaml
+sources:
+  - label: "arXiv"
+    type: api
+    adapter: arxiv
+    url: "http://export.arxiv.org/api/query"
+    enabled: true
+    default: true
+    config:
+      categories:
+        - cs.LG
+        - cs.AI
+        - cs.DC
+        - cs.PF
+        - cs.AR
+        - cs.CL
+      max_results_per_query: 100
+      rate_limit_seconds: 3
+      lookback_hours: 24
+```
+
+> **Note**: Additional sources (Semantic Scholar, RSS feeds, user-defined web pages) will be specified as they are added. The source list is extensible — each source implements the `SourceAdapter` interface defined in the constitution's pipeline contract.
+
+---
+
 ## User Scenarios & Testing
 
 ### User Story 1 — Configure Domains, Sources, and Run First Scan (Priority: P1)
@@ -33,7 +159,7 @@ A new user installs PubScout, defines their interests (e.g., "AI/ML research pap
 
 **Acceptance Scenarios**:
 
-1. **Given** no existing profile, **When** user runs `pubscout init`, **Then** an interactive wizard walks through: (a) domains & keywords, (b) **web sources — prompt asks "Enter websites/URLs to monitor (one per line, blank to finish):"**, (c) offer to enable default sources (arXiv, Semantic Scholar), (d) email address, (e) LLM API key — saving all to `~/.pubscout/profile.yaml`.
+1. **Given** no existing profile, **When** user runs `pubscout init`, **Then** an interactive wizard walks through: (a) domains — present the 6 default domain queries and let user enable/disable/edit each, plus add custom domains, (b) **web sources — prompt asks "Enter websites/URLs to monitor (one per line, blank to finish):"**, (c) offer to enable default sources (arXiv, Semantic Scholar), (d) email address, (e) LLM API key — saving all to `~/.pubscout/profile.yaml`.
 2. **Given** user provides 3 URLs during init (e.g., `https://blog.google/technology/ai/`, `https://openai.com/research`, `https://nvidia.com/en-us/research/`), **When** profile is saved, **Then** all 3 URLs appear in `profile.yaml` under `sources:` with auto-detected type (rss/web) and user-provided label (or auto-generated from domain name).
 3. **Given** user provides a URL during init, **When** the system probes the URL, **Then** it auto-detects whether the URL is an RSS/Atom feed, an API endpoint, or a generic web page — and configures the appropriate source adapter.
 4. **Given** a valid profile with 5 sources (2 default + 3 user-defined), **When** user runs `pubscout scan`, **Then** the system fetches from all 5 sources, deduplicates, scores relevance, and generates an HTML report.
@@ -145,8 +271,13 @@ The user can review past scan results, publication history, and feedback statist
 
 ### Functional Requirements
 
-- **FR-001**: System MUST support user-defined interest domains as free-text labels with associated keywords.
-- **FR-002**: System MUST fetch publications from arXiv API, Semantic Scholar API, and user-defined RSS feeds.
+- **FR-001**: System MUST support user-defined interest domains as structured boolean queries (AND/OR operators, quoted phrases) with human-readable labels. Each domain query defines a set of clauses that are evaluated against publication title, abstract, and keywords.
+- **FR-001a**: System MUST support a keyword pre-filter that evaluates domain boolean queries against publication text without LLM calls (fast pass).
+- **FR-001b**: System MUST pass matched domain labels and queries as context to the LLM scorer to guide relevance assessment.
+- **FR-001c**: System MUST ship with a default set of 6 domain queries (see "Domain Configuration" section) that the user can customize during `init` or by editing `profile.yaml`.
+- **FR-002**: System MUST fetch publications from arXiv API (via `arxiv` PyPI package), Semantic Scholar API, and user-defined RSS feeds.
+- **FR-002a**: The arXiv adapter MUST translate domain boolean queries into arXiv query syntax (`ti:`, `abs:`, `cat:` prefixes) and filter by configured categories (default: cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL).
+- **FR-002b**: The arXiv adapter MUST respect the 3-second courtesy delay between API requests and paginate results in batches of ≤100.
 - **FR-003**: System MUST support web scraping for user-defined URLs that are not RSS/API sources.
 - **FR-003a**: System MUST accept a user-provided list of web resources/sites during `init` and via `sources add` — this is a primary input, not optional.
 - **FR-003b**: System MUST auto-detect source type (RSS/Atom, API, generic web page) when a user provides a URL, and select the appropriate fetch adapter.
@@ -176,7 +307,8 @@ The user can review past scan results, publication history, and feedback statist
 
 ### Key Entities
 
-- **UserProfile**: Domains, keywords, source list, email config, LLM config, scoring thresholds, include/exclude filters.
+- **UserProfile**: Domains (structured boolean queries with labels), source list, email config, LLM config, scoring thresholds, include/exclude filters.
+- **Domain**: Label, boolean query string, enabled flag. Evaluated in two passes: keyword pre-filter (boolean text match) and LLM context injection.
 - **Publication**: Title, authors, abstract, URL, DOI, source, publication_date, fetch_date, relevance_score, reported (bool).
 - **FeedbackSignal**: Publication ID, timestamp, signal (positive/negative), user_notes (optional).
 - **ScanRun**: Run ID, timestamp, sources_checked, items_fetched, items_scored, items_reported, errors, duration.
