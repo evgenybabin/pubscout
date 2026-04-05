@@ -153,3 +153,17 @@ class FeedbackServer(HTTPServer):
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         return t
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PubScout feedback server")
+    parser.add_argument("--port", type=int, default=8230)
+    parser.add_argument("--timeout", type=int, default=3600)
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    server = FeedbackServer(port=args.port)
+    logger.info("Feedback server listening on http://127.0.0.1:%d", args.port)
+    server.start(timeout=args.timeout)

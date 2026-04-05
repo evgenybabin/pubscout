@@ -150,8 +150,12 @@ class TestGenerateHTML:
     def test_feedback_links(self, generator: ReportGenerator, scan_run: ScanRun):
         pub = _pub()
         html = generator.generate_html([pub], scan_run)
-        assert f"http://test-server:9000/feedback?id={pub.id}&signal=positive" in html
-        assert f"http://test-server:9000/feedback?id={pub.id}&signal=negative" in html
+        # Links are now JS-driven data attributes
+        assert f'data-pub-id="{pub.id}"' in html
+        assert 'data-signal="positive"' in html
+        assert 'data-signal="negative"' in html
+        # JS handler references the feedback base URL
+        assert "http://test-server:9000" in html
 
     def test_score_color_coding(self, generator: ReportGenerator, scan_run: ScanRun):
         green_pub = _pub(title="Green Paper", relevance_score=8.5)

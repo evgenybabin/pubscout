@@ -207,7 +207,8 @@ def _interactive_init(sources_file: str | None) -> "UserProfile":
 @click.option("--no-email", is_flag=True, help="Skip email delivery")
 @click.option("--timeout", type=int, default=30, help="HTTP timeout per source (seconds)")
 @click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
-def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> None:
+@click.option("--with-feedback", is_flag=True, help="Auto-start feedback server for report links")
+def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None, with_feedback: bool) -> None:
     """Run a publication scan."""
     user_profile, _ = _load_or_exit(profile)
 
@@ -215,6 +216,11 @@ def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> No
         console.print(
             "[yellow]Warning: No LLM API key configured. Using keyword-only scoring.[/yellow]"
         )
+
+    # Auto-start feedback server so report links work
+    fb_thread = None
+    if with_feedback or dry_run:
+        fb_thread = _start_feedback_server_background()
 
     db = PubScoutDB()
     pipeline = ScanPipeline(user_profile, db)
@@ -237,6 +243,33 @@ def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> No
 
     if dry_run:
         console.print("\n[yellow]Dry run — report saved to ~/.pubscout/reports/[/yellow]")
+    if fb_thread:
+        console.print(
+            "[green]Feedback server running at http://localhost:8230 — "
+            "thumbs up/down links in the report are active.[/green]"
+        )
+
+
+def _start_feedback_server_background():
+    """Start the feedback server as a detached subprocess. Returns the process or None."""
+    import subprocess
+    import time
+    try:
+        # Spawn as a separate process so it survives after the CLI exits
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pubscout.core.feedback_server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        # Give it a moment to bind the port
+        time.sleep(1)
+        if proc.poll() is not None:
+            return None  # Process exited immediately — port likely in use
+        return proc
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Could not start feedback server: %s", exc)
+        return None
 
 
 # ── sources ──────────────────────────────────────────────────────────
