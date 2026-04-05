@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── Configuration Models ─────────────────────────────────────────────
@@ -30,6 +30,21 @@ class Source(BaseModel):
     enabled: bool = True
     default: bool = False
     config: dict[str, Any] | None = None
+    user_added: bool = False
+    added_date: str | None = None
+
+
+class EmailConfig(BaseModel):
+    """Email delivery configuration."""
+
+    transport: Literal["smtp", "file"] = "file"
+    from_addr: str = "user@example.com"
+    to_addr: str = "user@example.com"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_username: str = ""
+    smtp_password_env: str = ""
 
 
 class LLMConfig(BaseModel):
@@ -54,9 +69,24 @@ class UserProfile(BaseModel):
 
     domains: list[Domain]
     sources: list[Source]
-    email: str
+    email: EmailConfig | str = Field(default_factory=EmailConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    version: int = 1
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_email(cls, data: Any) -> Any:
+        """Accept ``email: "user@example.com"`` (v1) and convert to EmailConfig."""
+        if isinstance(data, dict):
+            email_val = data.get("email")
+            if isinstance(email_val, str):
+                data["email"] = {
+                    "transport": "file",
+                    "from_addr": email_val,
+                    "to_addr": email_val,
+                }
+        return data
 
 
 # ── Runtime / Pipeline Models ────────────────────────────────────────

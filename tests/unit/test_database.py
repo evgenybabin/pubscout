@@ -213,3 +213,77 @@ class TestFeedback:
         negatives = db.get_negative_examples()
         assert len(negatives) == 1
         assert negatives[0].title == "Bad Paper"
+
+
+# ── Aggregate Stats ──────────────────────────────────────────────────
+
+
+class TestAggregateStats:
+    def test_count_publications_empty(self, db: PubScoutDB):
+        assert db.count_publications() == 0
+
+    def test_count_publications_with_data(self, db: PubScoutDB):
+        db.save_publication(_make_pub(title="A", arxiv_id="2401.00001", doi="10.1/a"))
+        db.save_publication(_make_pub(title="B", arxiv_id="2401.00002", doi="10.1/b"))
+        assert db.count_publications() == 2
+
+    def test_count_reported_publications(self, db: PubScoutDB):
+        p1 = _make_pub(title="A", arxiv_id="2401.00001", doi="10.1/a")
+        p2 = _make_pub(title="B", arxiv_id="2401.00002", doi="10.1/b", reported=True)
+        db.save_publication(p1)
+        db.save_publication(p2)
+        assert db.count_reported_publications() == 1
+
+    def test_count_scans(self, db: PubScoutDB):
+        assert db.count_scans() == 0
+        run = ScanRun(sources_checked=1, items_fetched=5, items_scored=5, items_reported=2)
+        db.save_scan_run(run)
+        assert db.count_scans() == 1
+
+    def test_count_feedback_by_signal(self, db: PubScoutDB):
+        pub = _make_pub()
+        db.save_publication(pub)
+        db.save_feedback(FeedbackSignal(publication_id=pub.id, signal="positive"))
+        db.save_feedback(FeedbackSignal(publication_id=pub.id, signal="positive"))
+        db.save_feedback(FeedbackSignal(publication_id=pub.id, signal="negative"))
+
+        counts = db.count_feedback_by_signal()
+        assert counts.get("positive", 0) == 2
+        assert counts.get("negative", 0) == 1
+
+    def test_get_domain_stats(self, db: PubScoutDB):
+        p1 = _make_pub(
+            title="A", arxiv_id="2401.00001", doi="10.1/a",
+            matched_domains=["ML", "AI"], reported=True,
+        )
+        p2 = _make_pub(
+            title="B", arxiv_id="2401.00002", doi="10.1/b",
+            matched_domains=["ML"], reported=True,
+        )
+        db.save_publication(p1)
+        db.save_publication(p2)
+        stats = db.get_domain_stats()
+        domain_dict = {label: count for label, count in stats}
+        assert domain_dict.get("ML", 0) >= 2
+        assert domain_dict.get("AI", 0) >= 1
+
+    def test_get_source_stats(self, db: PubScoutDB):
+        p1 = _make_pub(title="A", arxiv_id="2401.00001", doi="10.1/a", source_label="arXiv")
+        p2 = _make_pub(title="B", arxiv_id="2401.00002", doi="10.1/b", source_label="arXiv", reported=True)
+        db.save_publication(p1)
+        db.save_publication(p2)
+        stats = db.get_source_stats()
+        assert len(stats) >= 1
+        # stats format: (source_label, fetched_count, reported_count)
+        arxiv_stat = [s for s in stats if s[0] == "arXiv"]
+        assert len(arxiv_stat) == 1
+        assert arxiv_stat[0][1] == 2  # fetched
+        assert arxiv_stat[0][2] == 1  # reported
+
+    def test_stats_with_since_filter(self, db: PubScoutDB):
+        p1 = _make_pub(title="Old", arxiv_id="2401.00001", doi="10.1/old")
+        db.save_publication(p1)
+        # count_publications with a future 'since' should return 0
+        assert db.count_publications(since="2099-01-01") == 0
+        # count without filter should return 1
+        assert db.count_publications() == 1

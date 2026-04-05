@@ -21,9 +21,12 @@ class TestCreateDefaultProfile:
         profile = create_default_profile()
         assert len(profile.domains) == 6
 
-    def test_returns_valid_profile_with_one_source(self) -> None:
+    def test_returns_valid_profile_with_default_sources(self) -> None:
         profile = create_default_profile()
-        assert len(profile.sources) == 1
+        assert len(profile.sources) == 2
+        labels = {s.label for s in profile.sources}
+        assert "arXiv" in labels
+        assert "Semantic Scholar" in labels
 
     def test_all_default_domains_are_enabled(self) -> None:
         profile = create_default_profile()

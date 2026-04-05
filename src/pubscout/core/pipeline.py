@@ -5,8 +5,12 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 from pubscout.adapters.arxiv_adapter import ArxivAdapter
+from pubscout.adapters.rss_adapter import RssAdapter
+from pubscout.adapters.semantic_scholar import SemanticScholarAdapter
+from pubscout.adapters.web_adapter import WebAdapter
 from pubscout.core.dedup import Deduplicator
 from pubscout.core.models import Publication, ScanRun, UserProfile
 from pubscout.core.report import ReportGenerator
@@ -14,6 +18,23 @@ from pubscout.core.scorer import RelevanceScorer
 from pubscout.storage.database import PubScoutDB
 
 logger = logging.getLogger(__name__)
+
+# ── Adapter Registry ─────────────────────────────────────────────────
+
+ADAPTER_REGISTRY: dict[str, type] = {
+    "arxiv": ArxivAdapter,
+    "semantic_scholar": SemanticScholarAdapter,
+    "rss": RssAdapter,
+    "web": WebAdapter,
+}
+
+
+def register_adapter(name: str, adapter_cls: type) -> None:
+    """Register a new source adapter by name."""
+    ADAPTER_REGISTRY[name] = adapter_cls
+
+
+# ── Pipeline ─────────────────────────────────────────────────────────
 
 
 class ScanPipeline:
@@ -28,17 +49,8 @@ class ScanPipeline:
 
     # ── public API ───────────────────────────────────────────
 
-    def run(self, dry_run: bool = False) -> ScanRun:
-        """Execute the full pipeline and return a :class:`ScanRun` summary.
-
-        Steps:
-        1. Fetch from all enabled sources (currently arXiv only).
-        2. Deduplicate within batch and against the database.
-        3. Score via keyword pre-filter + LLM.
-        4. Generate an HTML report.
-        5. Save results to the database.
-        6. *dry_run* skips email delivery (not yet implemented anyway).
-        """
+    def run(self, dry_run: bool = False, send_email: bool = True) -> ScanRun:
+        """Execute the full pipeline and return a :class:`ScanRun` summary."""
         start_time = time.time()
         errors: list[str] = []
         all_publications: list[Publication] = []
@@ -105,17 +117,45 @@ class ScanPipeline:
         self.db.mark_reported([p.id for p in scored_pubs])
         self.db.save_scan_run(scan_run)
 
+        # Step 7 — Email delivery
         if dry_run:
             logger.info("Dry run — report at %s, no email sent", report_path)
+        elif not send_email:
+            logger.info("Email disabled — report saved to %s", report_path)
         else:
-            logger.info("Email sending not yet implemented — report saved to file")
+            self._send_email(html, scored_pubs, scan_run)
 
         return scan_run
 
     # ── private helpers ──────────────────────────────────────
 
-    def _get_adapter(self, source):
-        """Return the adapter instance for *source.adapter*."""
-        if source.adapter == "arxiv":
-            return ArxivAdapter()
-        raise ValueError(f"Unknown adapter: {source.adapter}")
+    def _get_adapter(self, source: Any) -> Any:
+        """Return the adapter instance for *source.adapter* from the registry."""
+        adapter_cls = ADAPTER_REGISTRY.get(source.adapter)
+        if adapter_cls is None:
+            raise ValueError(f"Unknown adapter: {source.adapter!r}")
+        return adapter_cls()
+
+    def _send_email(
+        self, html: str, publications: list[Publication], scan_run: ScanRun
+    ) -> None:
+        """Send email digest if email is configured for SMTP transport."""
+        from pubscout.core.models import EmailConfig
+
+        email_cfg = self.profile.email
+        if not isinstance(email_cfg, EmailConfig) or email_cfg.transport != "smtp":
+            logger.info("Email transport is not smtp — report saved to file only")
+            return
+
+        try:
+            from pubscout.core.email import SmtpEmailSender
+
+            sender = SmtpEmailSender()
+            count = len(publications)
+            ok = sender.send(html, f"PubScout Digest — {count} papers", email_cfg)
+            if ok:
+                logger.info("Email sent successfully")
+            else:
+                logger.warning("Email delivery failed — report still saved to file")
+        except Exception as exc:
+            logger.warning("Email sending error: %s — report still saved to file", exc)

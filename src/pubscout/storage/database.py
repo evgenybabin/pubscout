@@ -257,6 +257,92 @@ class PubScoutDB:
         ).fetchall()
         return [self._row_to_publication(r) for r in rows]
 
+    # ── Aggregate Stats ─────────────────────────────────────────────
+
+    def count_publications(self, since: str | None = None) -> int:
+        if since:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM publications WHERE fetch_date >= ?", (since,)
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM publications").fetchone()
+        return row[0] if row else 0
+
+    def count_reported_publications(self, since: str | None = None) -> int:
+        if since:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM publications WHERE reported = 1 AND fetch_date >= ?",
+                (since,),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM publications WHERE reported = 1"
+            ).fetchone()
+        return row[0] if row else 0
+
+    def count_scans(self, since: str | None = None) -> int:
+        if since:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM scan_runs WHERE timestamp >= ?", (since,)
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM scan_runs").fetchone()
+        return row[0] if row else 0
+
+    def count_feedback_by_signal(self, since: str | None = None) -> dict[str, int]:
+        if since:
+            rows = self._conn.execute(
+                "SELECT signal, COUNT(*) FROM feedback WHERE timestamp >= ? GROUP BY signal",
+                (since,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT signal, COUNT(*) FROM feedback GROUP BY signal"
+            ).fetchall()
+        result: dict[str, int] = {"positive": 0, "negative": 0}
+        for r in rows:
+            result[r[0]] = r[1]
+        return result
+
+    def get_domain_stats(self, since: str | None = None) -> list[tuple[str, int]]:
+        """Return (domain_label, count) for reported publications."""
+        if since:
+            rows = self._conn.execute(
+                """SELECT matched_domains FROM publications
+                   WHERE reported = 1 AND fetch_date >= ?""",
+                (since,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT matched_domains FROM publications WHERE reported = 1"
+            ).fetchall()
+        domain_counts: dict[str, int] = {}
+        for r in rows:
+            domains = json.loads(r[0]) if r[0] else []
+            for d in domains:
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+        return sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)
+
+    def get_source_stats(self, since: str | None = None) -> list[tuple[str, int, int]]:
+        """Return (source_label, fetched_count, reported_count)."""
+        if since:
+            rows = self._conn.execute(
+                """SELECT source_label,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN reported = 1 THEN 1 ELSE 0 END) as reported
+                   FROM publications WHERE fetch_date >= ?
+                   GROUP BY source_label ORDER BY total DESC""",
+                (since,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT source_label,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN reported = 1 THEN 1 ELSE 0 END) as reported
+                   FROM publications GROUP BY source_label ORDER BY total DESC"""
+            ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
     # ── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod

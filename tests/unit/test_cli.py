@@ -34,10 +34,10 @@ def isolated_env(tmp_path, monkeypatch):
 # ── init ─────────────────────────────────────────────────────────────
 
 def test_init_creates_profile(runner, isolated_env):
-    """``pubscout init`` creates a new profile.yaml and prints success."""
+    """``pubscout init --non-interactive`` creates a new profile."""
     _tmp, profile_path, _ = isolated_env
 
-    result = runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["init", "--non-interactive"])
 
     assert result.exit_code == 0
     assert profile_path.exists()
@@ -48,16 +48,13 @@ def test_init_existing_profile_warns(runner, isolated_env):
     """Running init when profile already exists warns and does not overwrite."""
     _tmp, profile_path, _ = isolated_env
 
-    # First init — create the profile
-    runner.invoke(cli, ["init"])
+    runner.invoke(cli, ["init", "--non-interactive"])
     original_content = profile_path.read_text()
 
-    # Second init — should warn
-    result = runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["init", "--non-interactive"])
 
     assert result.exit_code == 0
     assert "already exists" in result.output
-    # Content unchanged
     assert profile_path.read_text() == original_content
 
 
@@ -75,8 +72,7 @@ def test_scan_dry_run(runner, isolated_env, monkeypatch):
     """``pubscout scan --dry-run`` runs the pipeline and shows a results table."""
     _tmp, _profile_path, _ = isolated_env
 
-    # Create profile first
-    runner.invoke(cli, ["init"])
+    runner.invoke(cli, ["init", "--non-interactive"])
 
     mock_scan_run = ScanRun(
         sources_checked=1,
@@ -99,9 +95,27 @@ def test_scan_dry_run(runner, isolated_env, monkeypatch):
 
     assert result.exit_code == 0
     assert "Scan Results" in result.output
-    assert "25" in result.output  # items_fetched
-    assert "3.2s" in result.output  # duration
+    assert "25" in result.output
+    assert "3.2s" in result.output
     assert "Dry run" in result.output
+
+
+def test_scan_no_email_flag(runner, isolated_env, monkeypatch):
+    """``pubscout scan --no-email`` passes send_email=False to pipeline."""
+    _tmp, _profile_path, _ = isolated_env
+    runner.invoke(cli, ["init", "--non-interactive"])
+
+    mock_scan_run = ScanRun(
+        sources_checked=1, items_fetched=1, items_scored=1, items_reported=1,
+        errors=[], duration_seconds=0.5,
+    )
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = mock_scan_run
+    monkeypatch.setattr("pubscout.cli.main.ScanPipeline", lambda p, db: mock_pipeline)
+
+    result = runner.invoke(cli, ["scan", "--no-email"])
+    assert result.exit_code == 0
+    mock_pipeline.run.assert_called_once_with(dry_run=False, send_email=False)
 
 
 # ── sources ──────────────────────────────────────────────────────────
@@ -115,13 +129,72 @@ def test_sources_no_profile_exits(runner, isolated_env):
 
 
 def test_sources_lists_configured(runner, isolated_env):
-    """After init, ``pubscout sources`` shows the arXiv source."""
-    runner.invoke(cli, ["init"])
+    """After init, ``pubscout sources`` shows sources."""
+    runner.invoke(cli, ["init", "--non-interactive"])
     result = runner.invoke(cli, ["sources"])
 
     assert result.exit_code == 0
     assert "Configured Sources" in result.output
     assert "arXiv" in result.output
+
+
+def test_sources_add_and_remove(runner, isolated_env):
+    """Add a source, then remove it."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["sources", "add", "https://example.com/feed.xml", "--name", "Test", "--type", "rss", "--no-detect"])
+    assert result.exit_code == 0
+    assert "Added source" in result.output
+
+    result = runner.invoke(cli, ["sources", "remove", "Test"], input="y\n")
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+
+
+def test_sources_enable_disable(runner, isolated_env):
+    """Enable/disable a source."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["sources", "disable", "arXiv"])
+    assert result.exit_code == 0
+    assert "Disabled" in result.output
+
+    result = runner.invoke(cli, ["sources", "enable", "arXiv"])
+    assert result.exit_code == 0
+    assert "Enabled" in result.output
+
+
+def test_sources_export(runner, isolated_env):
+    """Export outputs all URLs."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["sources", "export"])
+    assert result.exit_code == 0
+    assert "arxiv" in result.output.lower()
+
+
+def test_sources_import(runner, isolated_env):
+    """Import adds URLs from a file."""
+    _tmp, _, _ = isolated_env
+    runner.invoke(cli, ["init", "--non-interactive"])
+    import_file = _tmp / "urls.txt"
+    import_file.write_text("https://example.com/feed1\nhttps://example.com/feed2\n")
+    result = runner.invoke(cli, ["sources", "import", str(import_file)])
+    assert result.exit_code == 0
+    assert "Imported 2" in result.output
+
+
+def test_sources_duplicate_add(runner, isolated_env):
+    """Adding a duplicate URL warns."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    runner.invoke(cli, ["sources", "add", "http://export.arxiv.org/api/query", "--no-detect"])
+    result = runner.invoke(cli, ["sources", "add", "http://export.arxiv.org/api/query", "--no-detect"])
+    assert "already exists" in result.output
+
+
+def test_sources_catalog(runner):
+    """Catalog command lists built-in sources."""
+    result = runner.invoke(cli, ["sources", "catalog"])
+    assert result.exit_code == 0
+    assert "arXiv" in result.output
+    assert "Semantic Scholar" in result.output
 
 
 # ── domains ──────────────────────────────────────────────────────────
@@ -136,14 +209,127 @@ def test_domains_no_profile_exits(runner, isolated_env):
 
 def test_domains_lists_configured(runner, isolated_env):
     """After init, ``pubscout domains`` shows 6 domains."""
-    runner.invoke(cli, ["init"])
+    runner.invoke(cli, ["init", "--non-interactive"])
     result = runner.invoke(cli, ["domains"])
 
     assert result.exit_code == 0
     assert "Configured Domains" in result.output
-    # Default profile has 6 domains — verify rows numbered 1..6
     for n in range(1, 7):
         assert str(n) in result.output
+
+
+def test_domains_add_and_remove(runner, isolated_env):
+    """Add then remove a domain."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["domains", "add", "TestDomain", "LLM AND inference"])
+    assert result.exit_code == 0
+    assert "Added domain" in result.output
+
+    result = runner.invoke(cli, ["domains", "remove", "TestDomain"])
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+
+
+def test_domains_add_invalid_query(runner, isolated_env):
+    """Adding a domain with bad query syntax is rejected."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["domains", "add", "Bad", "AND OR"])
+    assert "Invalid query" in result.output
+
+
+def test_domains_enable_disable(runner, isolated_env):
+    """Enable/disable a domain."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["domains", "disable", "LLM Disaggregated Inference"])
+    assert result.exit_code == 0
+    assert "Disabled" in result.output
+
+    result = runner.invoke(cli, ["domains", "enable", "LLM Disaggregated Inference"])
+    assert result.exit_code == 0
+    assert "Enabled" in result.output
+
+
+def test_domains_remove_nonexistent(runner, isolated_env):
+    """Removing a nonexistent domain shows error."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["domains", "remove", "DoesNotExist"])
+    assert "not found" in result.output
+
+
+def test_domains_catalog(runner):
+    """Catalog command lists built-in domains."""
+    result = runner.invoke(cli, ["domains", "catalog"])
+    assert result.exit_code == 0
+    assert "LLM Disaggregated Inference" in result.output
+
+
+# ── config ───────────────────────────────────────────────────────────
+
+def test_config_show(runner, isolated_env):
+    """Config show displays current settings."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "show"])
+    assert result.exit_code == 0
+    assert "Threshold" in result.output
+    assert "5.0" in result.output
+
+
+def test_config_threshold_valid(runner, isolated_env):
+    """Setting a valid threshold succeeds."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "threshold", "7.0"])
+    assert result.exit_code == 0
+    assert "7.0" in result.output
+
+
+def test_config_threshold_out_of_range(runner, isolated_env):
+    """Setting threshold outside 1-10 is rejected."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "threshold", "11.0"])
+    assert "between 1.0 and 10.0" in result.output
+
+
+def test_config_exclude_add_remove(runner, isolated_env):
+    """Add and remove exclude keywords."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "exclude-add", "survey"])
+    assert "Added exclude" in result.output
+
+    result = runner.invoke(cli, ["config", "exclude-remove", "survey"])
+    assert "Removed exclude" in result.output
+
+
+def test_config_include_add_remove(runner, isolated_env):
+    """Add and remove include keywords."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "include-add", "transformer"])
+    assert "Added include" in result.output
+
+    result = runner.invoke(cli, ["config", "include-remove", "transformer"])
+    assert "Removed include" in result.output
+
+
+def test_config_model(runner, isolated_env):
+    """Set the LLM model."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "model", "gpt-4o"])
+    assert result.exit_code == 0
+    assert "gpt-4o" in result.output
+
+
+# ── feedback ─────────────────────────────────────────────────────────
+
+def test_feedback_record_not_found(runner, isolated_env):
+    """Recording feedback for nonexistent publication shows error."""
+    result = runner.invoke(cli, ["feedback", "record", "bad-id", "up"])
+    # DB is mocked so get_publication returns None
+    assert result.exit_code == 0 or "not found" in result.output
+
+
+def test_feedback_list_empty(runner, isolated_env):
+    """Listing feedback when empty shows a message."""
+    result = runner.invoke(cli, ["feedback", "list"])
+    assert result.exit_code == 0
 
 
 # ── history ──────────────────────────────────────────────────────────
@@ -182,10 +368,37 @@ def test_history_with_runs(runner, tmp_path, monkeypatch):
     assert "2.5s" in result.output
 
 
+# ── stats ────────────────────────────────────────────────────────────
+
+def test_stats_empty(runner, tmp_path, monkeypatch):
+    """Stats on empty DB shows zeros."""
+    mock_db = MagicMock()
+    mock_db.count_publications.return_value = 0
+    mock_db.count_reported_publications.return_value = 0
+    mock_db.count_scans.return_value = 0
+    mock_db.count_feedback_by_signal.return_value = {"positive": 0, "negative": 0}
+    mock_db.get_domain_stats.return_value = []
+    mock_db.get_source_stats.return_value = []
+    monkeypatch.setattr("pubscout.cli.main.PubScoutDB", lambda db_path=None: mock_db)
+
+    result = runner.invoke(cli, ["stats"])
+    assert result.exit_code == 0
+    assert "Total publications: 0" in result.output
+
+
+# ── schedule ─────────────────────────────────────────────────────────
+
+def test_schedule_show(runner):
+    """Schedule show outputs OS-appropriate command."""
+    result = runner.invoke(cli, ["schedule", "show"])
+    assert result.exit_code == 0
+    assert "pubscout scan" in result.output
+
+
 # ── verbose flag ─────────────────────────────────────────────────────
 
 def test_verbose_flag(runner, isolated_env):
     """The ``-v`` flag does not cause a crash."""
-    result = runner.invoke(cli, ["-v", "init"])
+    result = runner.invoke(cli, ["-v", "init", "--non-interactive"])
 
     assert result.exit_code == 0

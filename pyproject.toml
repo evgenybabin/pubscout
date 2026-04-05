@@ -1,6 +1,6 @@
 [project]
 name = "pubscout"
-version = "0.1.0"
+version = "0.2.0"
 description = "CLI-driven publication scanning agent — fetches, filters, scores, and reports new research papers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,8 @@ dependencies = [
     "rapidfuzz>=3.0",
     "rich>=13.0",
     "httpx>=0.27",
+    "feedparser>=6.0",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
