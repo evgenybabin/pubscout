@@ -79,7 +79,7 @@ SAMPLE_PUBLICATIONS = [
 
 @pytest.fixture
 def generator() -> ReportGenerator:
-    return ReportGenerator(feedback_base_url="http://test-server:9000")
+    return ReportGenerator()
 
 
 @pytest.fixture
@@ -150,12 +150,13 @@ class TestGenerateHTML:
     def test_feedback_links(self, generator: ReportGenerator, scan_run: ScanRun):
         pub = _pub()
         html = generator.generate_html([pub], scan_run)
-        # Links are now JS-driven data attributes
-        assert f'data-pub-id="{pub.id}"' in html
-        assert 'data-signal="positive"' in html
-        assert 'data-signal="negative"' in html
-        # JS handler references the feedback base URL
-        assert "http://test-server:9000" in html
+        # Local feedback: JS vote() handler, no server dependency
+        assert f"vote('{pub.id}','positive'" in html or f"vote(&#39;{pub.id}&#39;,&#39;positive&#39;" in html
+        assert "saveFeedback" in html
+        assert "localStorage" in html
+        # No server references
+        assert "localhost:8230" not in html
+        assert "Server offline" not in html
 
     def test_score_color_coding(self, generator: ReportGenerator, scan_run: ScanRun):
         green_pub = _pub(title="Green Paper", relevance_score=8.5)

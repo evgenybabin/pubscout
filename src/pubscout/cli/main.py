@@ -207,8 +207,7 @@ def _interactive_init(sources_file: str | None) -> "UserProfile":
 @click.option("--no-email", is_flag=True, help="Skip email delivery")
 @click.option("--timeout", type=int, default=30, help="HTTP timeout per source (seconds)")
 @click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
-@click.option("--with-feedback", is_flag=True, help="Auto-start feedback server for report links")
-def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None, with_feedback: bool) -> None:
+def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> None:
     """Run a publication scan."""
     user_profile, _ = _load_or_exit(profile)
 
@@ -216,11 +215,6 @@ def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None, with_
         console.print(
             "[yellow]Warning: No LLM API key configured. Using keyword-only scoring.[/yellow]"
         )
-
-    # Auto-start feedback server so report links work
-    fb_thread = None
-    if with_feedback or dry_run:
-        fb_thread = _start_feedback_server_background()
 
     db = PubScoutDB()
     pipeline = ScanPipeline(user_profile, db)
@@ -243,33 +237,10 @@ def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None, with_
 
     if dry_run:
         console.print("\n[yellow]Dry run — report saved to ~/.pubscout/reports/[/yellow]")
-    if fb_thread:
         console.print(
-            "[green]Feedback server running at http://localhost:8230 — "
-            "thumbs up/down links in the report are active.[/green]"
+            "[dim]Rate papers with 👍/👎 in the report, then save & import:[/dim]\n"
+            "[dim]  pubscout feedback import feedback.json[/dim]"
         )
-
-
-def _start_feedback_server_background():
-    """Start the feedback server as a detached subprocess. Returns the process or None."""
-    import subprocess
-    import time
-    try:
-        # Spawn as a separate process so it survives after the CLI exits
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pubscout.core.feedback_server"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        # Give it a moment to bind the port
-        time.sleep(1)
-        if proc.poll() is not None:
-            return None  # Process exited immediately — port likely in use
-        return proc
-    except Exception as exc:
-        logging.getLogger(__name__).debug("Could not start feedback server: %s", exc)
-        return None
 
 
 # ── sources ──────────────────────────────────────────────────────────
@@ -739,15 +710,46 @@ def feedback_list(limit: int, signal: str | None) -> None:
     console.print(table)
 
 
-@feedback.command("serve")
-@click.option("--port", default=8230, help="Port for feedback server")
-@click.option("--timeout", default=3600, help="Inactivity timeout (seconds)")
-def feedback_serve(port: int, timeout: int) -> None:
-    """Start the feedback HTTP server."""
-    from pubscout.core.feedback_server import FeedbackServer
-    console.print(f"Starting feedback server on http://127.0.0.1:{port}")
-    server = FeedbackServer(port=port)
-    server.start(timeout=timeout)
+@feedback.command("import")
+@click.argument("file", type=click.Path(exists=True))
+def feedback_import(file: str) -> None:
+    """Import feedback from a JSON file exported from the HTML report.
+
+    The file should contain a JSON array like:
+      [{"publication_id": "...", "signal": "positive|negative", "timestamp": "..."}]
+    """
+    import json
+    from pathlib import Path as _Path
+    from pubscout.core.models import FeedbackSignal
+
+    data = json.loads(_Path(file).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        console.print("[red]Expected a JSON array of feedback entries.[/red]")
+        return
+
+    db = PubScoutDB()
+    pos = neg = skipped = 0
+    for entry in data:
+        pub_id = entry.get("publication_id", "")
+        signal = entry.get("signal", "")
+        if signal not in ("positive", "negative"):
+            skipped += 1
+            continue
+        pub = db.get_publication(pub_id)
+        if pub is None:
+            skipped += 1
+            continue
+        fb = FeedbackSignal(publication_id=pub_id, signal=signal)
+        db.save_feedback(fb)
+        if signal == "positive":
+            pos += 1
+        else:
+            neg += 1
+
+    console.print(
+        f"[green]✓ Imported {pos} positive, {neg} negative "
+        f"({skipped} skipped)[/green]"
+    )
 
 
 # ── email ────────────────────────────────────────────────────────────
