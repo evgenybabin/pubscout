@@ -205,9 +205,10 @@ def _interactive_init(sources_file: str | None) -> "UserProfile":
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Save report to file, skip email")
 @click.option("--no-email", is_flag=True, help="Skip email delivery")
+@click.option("--days", type=int, default=None, help="Scan range in days (default: from profile, typically 7)")
 @click.option("--timeout", type=int, default=30, help="HTTP timeout per source (seconds)")
 @click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
-def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> None:
+def scan(dry_run: bool, no_email: bool, days: int | None, timeout: int, profile: str | None) -> None:
     """Run a publication scan."""
     user_profile, _ = _load_or_exit(profile)
 
@@ -216,11 +217,14 @@ def scan(dry_run: bool, no_email: bool, timeout: int, profile: str | None) -> No
             "[yellow]Warning: No LLM API key configured. Using keyword-only scoring.[/yellow]"
         )
 
+    effective_days = days if days is not None else user_profile.scan_range_days
+    console.print(f"[dim]Scan range: last {effective_days} day(s)[/dim]")
+
     db = PubScoutDB()
     pipeline = ScanPipeline(user_profile, db)
 
     console.print("[bold]Starting scan...[/bold]")
-    scan_run = pipeline.run(dry_run=dry_run, send_email=not no_email)
+    scan_run = pipeline.run(dry_run=dry_run, send_email=not no_email, scan_range_days=days)
 
     console.print()
     table = Table(title="Scan Results")
@@ -567,7 +571,9 @@ def config() -> None:
 def config_show(profile: str | None) -> None:
     """Display current configuration."""
     user_profile, _ = _load_or_exit(profile)
-    console.print(f"[bold]Scoring[/bold]")
+    console.print(f"[bold]Scanning[/bold]")
+    console.print(f"  Scan range: {user_profile.scan_range_days} day(s)")
+    console.print(f"\n[bold]Scoring[/bold]")
     console.print(f"  Threshold: {user_profile.scoring.threshold}")
     console.print(f"  Include keywords: {user_profile.scoring.include_keywords or '(none)'}")
     console.print(f"  Exclude keywords: {user_profile.scoring.exclude_keywords or '(none)'}")
@@ -652,6 +658,21 @@ def config_model(name: str, profile: str | None) -> None:
     user_profile.llm.model = name
     save_profile(user_profile, profile_path)
     console.print(f"[green]✓ Model set to {name}[/green]")
+
+
+@config.command("scan-range")
+@click.argument("days", type=int)
+@click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
+def config_scan_range(days: int, profile: str | None) -> None:
+    """Set the default scan range in days (1–365). Only papers published within
+    this window are included. Default: 7."""
+    if not 1 <= days <= 365:
+        console.print("[red]Scan range must be between 1 and 365 days[/red]")
+        return
+    user_profile, profile_path = _load_or_exit(profile)
+    user_profile.scan_range_days = days
+    save_profile(user_profile, profile_path)
+    console.print(f"[green]✓ Scan range set to {days} day(s)[/green]")
 
 
 # ── feedback ─────────────────────────────────────────────────────────

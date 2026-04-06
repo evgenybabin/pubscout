@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,8 +50,23 @@ class ScanPipeline:
 
     # ── public API ───────────────────────────────────────────
 
-    def run(self, dry_run: bool = False, send_email: bool = True) -> ScanRun:
-        """Execute the full pipeline and return a :class:`ScanRun` summary."""
+    def run(
+        self,
+        dry_run: bool = False,
+        send_email: bool = True,
+        scan_range_days: int | None = None,
+    ) -> ScanRun:
+        """Execute the full pipeline and return a :class:`ScanRun` summary.
+
+        Args:
+            dry_run: Save report to file, skip email delivery.
+            send_email: Whether to send an email digest.
+            scan_range_days: Override for the profile's ``scan_range_days``
+                (default: use the value from the user profile).
+        """
+        days = scan_range_days if scan_range_days is not None else self.profile.scan_range_days
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
         start_time = time.time()
         errors: list[str] = []
         all_publications: list[Publication] = []
@@ -74,6 +90,19 @@ class ScanPipeline:
 
         items_fetched = len(all_publications)
         logger.info("Total fetched: %d from %d sources", items_fetched, sources_checked)
+
+        # Step 1b — Filter by scan range (drop publications older than cutoff)
+        before_filter = len(all_publications)
+        all_publications = [
+            p for p in all_publications
+            if p.publication_date is None or p.publication_date >= cutoff
+        ]
+        filtered_out = before_filter - len(all_publications)
+        if filtered_out:
+            logger.info(
+                "Date filter (last %d days): removed %d, kept %d",
+                days, filtered_out, len(all_publications),
+            )
 
         # Step 2 — Deduplicate
         unique_pubs = self.deduplicator.deduplicate(all_publications)

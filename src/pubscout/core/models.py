@@ -72,6 +72,7 @@ class UserProfile(BaseModel):
     email: EmailConfig | str = Field(default_factory=EmailConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    scan_range_days: int = Field(default=7, ge=1, le=365)
     version: int = 1
 
     @model_validator(mode="before")

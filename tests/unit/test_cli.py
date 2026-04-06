@@ -115,7 +115,7 @@ def test_scan_no_email_flag(runner, isolated_env, monkeypatch):
 
     result = runner.invoke(cli, ["scan", "--no-email"])
     assert result.exit_code == 0
-    mock_pipeline.run.assert_called_once_with(dry_run=False, send_email=False)
+    mock_pipeline.run.assert_called_once_with(dry_run=False, send_email=False, scan_range_days=None)
 
 
 # ── sources ──────────────────────────────────────────────────────────
@@ -315,6 +315,35 @@ def test_config_model(runner, isolated_env):
     result = runner.invoke(cli, ["config", "model", "gpt-4o"])
     assert result.exit_code == 0
     assert "gpt-4o" in result.output
+
+
+def test_config_scan_range_valid(runner, isolated_env):
+    """Set scan range to a valid number of days."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "scan-range", "14"])
+    assert result.exit_code == 0
+    assert "14" in result.output
+    # Verify it persists
+    show = runner.invoke(cli, ["config", "show"])
+    assert "14 day(s)" in show.output
+
+
+def test_config_scan_range_out_of_range(runner, isolated_env):
+    """Reject scan range outside 1–365."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "scan-range", "0"])
+    assert "between 1 and 365" in result.output
+    result2 = runner.invoke(cli, ["config", "scan-range", "400"])
+    assert "between 1 and 365" in result2.output
+
+
+def test_config_show_includes_scan_range(runner, isolated_env):
+    """config show displays the scan range."""
+    runner.invoke(cli, ["init", "--non-interactive"])
+    result = runner.invoke(cli, ["config", "show"])
+    assert result.exit_code == 0
+    assert "Scan range:" in result.output
+    assert "7 day(s)" in result.output  # default
 
 
 # ── feedback ─────────────────────────────────────────────────────────

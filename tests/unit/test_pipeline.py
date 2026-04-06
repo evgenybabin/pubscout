@@ -285,3 +285,108 @@ def test_dry_run_does_not_send_email(
 
     assert isinstance(run, ScanRun)
     assert run.items_fetched >= 1
+
+
+# ── date-range filter tests ──────────────────────────────────────────
+
+
+@patch("pubscout.core.pipeline.RelevanceScorer")
+def test_run_filters_old_publications(
+    mock_scorer_cls: MagicMock,
+    mock_adapter,
+    profile,
+    db,
+):
+    """Publications older than scan_range_days are filtered out before scoring."""
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    recent_pub = _make_pub(
+        title="Recent Paper",
+        arxiv_id="2401.10001",
+        url="https://arxiv.org/abs/2401.10001",
+        publication_date=now - timedelta(days=2),
+    )
+    old_pub = _make_pub(
+        title="Old Paper",
+        arxiv_id="2401.10002",
+        url="https://arxiv.org/abs/2401.10002",
+        publication_date=now - timedelta(days=30),
+    )
+    mock_adapter.fetch.return_value = [recent_pub, old_pub]
+    mock_scorer_cls.return_value.score_publications.return_value = [recent_pub]
+
+    profile.scan_range_days = 7
+
+    with patch.dict(ADAPTER_REGISTRY, {"arxiv": lambda: mock_adapter}):
+        pipeline = ScanPipeline(profile, db)
+        run = pipeline.run(dry_run=True)
+
+    # Scorer should only receive the recent pub (old one filtered)
+    scored_call = mock_scorer_cls.return_value.score_publications.call_args
+    pubs_passed_to_scorer = scored_call[0][0]
+    titles = [p.title for p in pubs_passed_to_scorer]
+    assert "Recent Paper" in titles
+    assert "Old Paper" not in titles
+
+
+@patch("pubscout.core.pipeline.RelevanceScorer")
+def test_run_scan_range_override(
+    mock_scorer_cls: MagicMock,
+    mock_adapter,
+    profile,
+    db,
+):
+    """scan_range_days parameter overrides profile default."""
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    pub_10d_ago = _make_pub(
+        title="Ten Days Ago",
+        arxiv_id="2401.20001",
+        url="https://arxiv.org/abs/2401.20001",
+        publication_date=now - timedelta(days=10),
+    )
+    mock_adapter.fetch.return_value = [pub_10d_ago]
+
+    profile.scan_range_days = 7  # Would filter it out
+
+    # Override to 14 days — should keep the paper
+    mock_scorer_cls.return_value.score_publications.return_value = [pub_10d_ago]
+
+    with patch.dict(ADAPTER_REGISTRY, {"arxiv": lambda: mock_adapter}):
+        pipeline = ScanPipeline(profile, db)
+        run = pipeline.run(dry_run=True, scan_range_days=14)
+
+    scored_call = mock_scorer_cls.return_value.score_publications.call_args
+    pubs_passed_to_scorer = scored_call[0][0]
+    assert len(pubs_passed_to_scorer) == 1
+    assert pubs_passed_to_scorer[0].title == "Ten Days Ago"
+
+
+@patch("pubscout.core.pipeline.RelevanceScorer")
+def test_run_keeps_pubs_without_date(
+    mock_scorer_cls: MagicMock,
+    mock_adapter,
+    profile,
+    db,
+):
+    """Publications with no publication_date are kept (not filtered)."""
+    no_date_pub = _make_pub(
+        title="No Date Paper",
+        arxiv_id="2401.30001",
+        url="https://arxiv.org/abs/2401.30001",
+        publication_date=None,
+    )
+    mock_adapter.fetch.return_value = [no_date_pub]
+    mock_scorer_cls.return_value.score_publications.return_value = [no_date_pub]
+
+    profile.scan_range_days = 7
+
+    with patch.dict(ADAPTER_REGISTRY, {"arxiv": lambda: mock_adapter}):
+        pipeline = ScanPipeline(profile, db)
+        run = pipeline.run(dry_run=True)
+
+    scored_call = mock_scorer_cls.return_value.score_publications.call_args
+    pubs_passed_to_scorer = scored_call[0][0]
+    assert len(pubs_passed_to_scorer) == 1
