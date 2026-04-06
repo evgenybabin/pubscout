@@ -54,6 +54,9 @@ pubscout scan
 
 # Skip email, just save report
 pubscout scan --no-email
+
+# Scan last 14 days instead of default 7
+pubscout scan --days 14
 ```
 
 ---
@@ -66,6 +69,7 @@ PubScout stores its profile at `~/.pubscout/profile.yaml`. The interactive `init
 
 ```yaml
 version: 2
+scan_range_days: 7       # Only papers from the last N days (1–365)
 domains:
   - label: "LLM Disaggregated Inference"
     query: '"large language model" AND "disaggregated inference"'
@@ -124,6 +128,7 @@ pubscout init --sources-file urls.txt  # Import source URLs from file
 pubscout scan                       # Full scan + email
 pubscout scan --dry-run             # Report to file only
 pubscout scan --no-email            # Scan + save, skip email
+pubscout scan --days 14             # Override scan range (default: 7 days from profile)
 pubscout scan --timeout 60          # Custom HTTP timeout per source
 pubscout scan -p custom-profile.yaml  # Use a different profile
 ```
@@ -171,8 +176,9 @@ Domains use **boolean query syntax** for matching:
 ### `pubscout config` — Tuning
 
 ```bash
-pubscout config show                  # Display current scoring/LLM config
+pubscout config show                  # Display current scoring/scan config
 pubscout config threshold 7.0         # Set minimum relevance score (1.0–10.0)
+pubscout config scan-range 14         # Set scan time range in days (1–365, default: 7)
 pubscout config model gpt-4o          # Change LLM model
 pubscout config include-add "transformer"   # Boost papers with this keyword
 pubscout config include-remove "transformer"
@@ -191,13 +197,13 @@ Email requires SMTP configuration in the profile. Set `transport: smtp` and conf
 ### `pubscout feedback` — Relevance Feedback
 
 ```bash
-pubscout feedback list                # Show recent feedback entries
-pubscout feedback record PUB_ID up    # Positive feedback
-pubscout feedback record PUB_ID down  # Negative feedback
-pubscout feedback serve               # Start HTTP feedback server (port 8230)
+pubscout feedback list                       # Show recent feedback entries
+pubscout feedback record PUB_ID up           # Positive feedback
+pubscout feedback record PUB_ID down         # Negative feedback
+pubscout feedback import feedback.json       # Import feedback from HTML report export
 ```
 
-The feedback server provides clickable links in email reports — readers can thumbs-up/down papers directly from the digest. Feedback is stored in SQLite and used to improve future scoring.
+The HTML report includes inline 👍/👎 buttons per paper. Clicks are stored in your browser's `localStorage` and can be exported as a JSON file via the floating "Save feedback.json" bar. Import the file with `pubscout feedback import` to persist ratings in SQLite for future scoring improvement. No server required — everything works offline.
 
 ### `pubscout history` — Scan History
 
@@ -240,9 +246,8 @@ src/pubscout/
 ├── core/
 │   ├── dedup.py          # Fuzzy deduplication (DOI → arXiv ID → title similarity)
 │   ├── email.py          # SMTP email sender (STARTTLS/SSL)
-│   ├── feedback_server.py  # HTTP feedback server
 │   ├── models.py         # Pydantic models (UserProfile, Source, Domain, etc.)
-│   ├── pipeline.py       # Orchestrator: fetch → dedup → score → report → email
+│   ├── pipeline.py       # Orchestrator: fetch → dedup → date filter → score → report → email
 │   ├── profile.py        # Profile YAML I/O + v1→v2 migration
 │   ├── query.py          # Boolean query parser
 │   ├── report.py         # Jinja2 HTML report generator
@@ -256,9 +261,9 @@ src/pubscout/
 
 ```
 Sources ──→ Adapters ──→ Dedup ──→ Scorer ──→ Reporter ──→ Email
-                                      │                      │
-                                   SQLite ←── Feedback ←─────┘
-```
+Sources → Adapters → Date Filter (N days) → Dedup → Scorer → Reporter → Email
+                                            │                    │
+                                         SQLite ← Feedback (localStorage → JSON → import)
 
 ---
 
@@ -299,7 +304,7 @@ git clone https://github.com/evgenybabin/pubscout.git
 cd pubscout
 uv sync
 
-# Run tests (217 tests)
+# Run tests (223 tests)
 uv run pytest tests/ -q
 
 # Run with verbose output
@@ -321,8 +326,8 @@ uv run pytest tests/unit/test_cli.py -v
 | Web adapter | ~8 |
 | Database + stats | ~25 |
 | Dedup, scorer, models, profile | ~50 |
-| Email, source detection, feedback server | ~25 |
-| **Total** | **217** |
+| Email, source detection, feedback, scan range | ~31 |
+| **Total** | **223** |
 
 ---
 
