@@ -438,8 +438,16 @@ def sources_export(ctx: click.Context) -> None:
 
 
 @sources.command("catalog")
-def sources_catalog() -> None:
-    """List built-in source catalog."""
+@click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
+def sources_catalog(profile: str | None) -> None:
+    """List built-in source catalog with active/available status."""
+    active_urls: set[str] = set()
+    try:
+        user_profile, _ = _load_or_exit(profile)
+        active_urls = {s.url.lower().rstrip("/") for s in user_profile.sources}
+    except SystemExit:
+        pass  # no profile yet — show catalog without status
+
     catalog = [
         ("arXiv", "api", "http://export.arxiv.org/api/query", "arxiv"),
         ("Semantic Scholar", "api", "https://api.semanticscholar.org/graph/v1/paper/search", "semantic_scholar"),
@@ -448,14 +456,17 @@ def sources_catalog() -> None:
         ("Papers With Code", "web", "https://paperswithcode.com", "web"),
     ]
     table = Table(title="Source Catalog")
+    table.add_column("Status", style="bold")
     table.add_column("Label", style="cyan")
     table.add_column("Type", style="green")
     table.add_column("URL")
     table.add_column("Adapter")
     for label, typ, url, adapter in catalog:
-        table.add_row(label, typ, url, adapter)
+        is_active = url.lower().rstrip("/") in active_urls
+        status = "[green]● Active[/green]" if is_active else "[dim]○ Available[/dim]"
+        table.add_row(status, label, typ, url, adapter)
     console.print(table)
-    console.print("\nUse [bold]pubscout sources add <url>[/bold] to add any of these.")
+    console.print("\n[bold]● Active[/bold] = currently in your profile   [dim]○ Available[/dim] = add with [bold]pubscout sources add <url>[/bold]")
 
 
 # ── domains ──────────────────────────────────────────────────────────
@@ -559,14 +570,27 @@ def domains_disable(ctx: click.Context, label: str) -> None:
 
 
 @domains.command("catalog")
-def domains_catalog() -> None:
-    """List built-in domain catalog."""
+@click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
+def domains_catalog(profile: str | None) -> None:
+    """List built-in domain catalog with active/available status."""
+    active_labels: set[str] = set()
+    try:
+        user_profile, _ = _load_or_exit(profile)
+        active_labels = {d.label.lower() for d in user_profile.domains}
+    except SystemExit:
+        pass
+
     table = Table(title="Domain Catalog")
+    table.add_column("Status", style="bold")
     table.add_column("Label", style="cyan")
     table.add_column("Focus")
     for d in DEFAULT_DOMAINS:
-        table.add_row(d.label, d.query[:60] + "..." if len(d.query) > 60 else d.query)
+        is_active = d.label.lower() in active_labels
+        status = "[green]● Active[/green]" if is_active else "[dim]○ Available[/dim]"
+        query_display = d.query[:57] + "..." if len(d.query) > 60 else d.query
+        table.add_row(status, d.label, query_display)
     console.print(table)
+    console.print("\n[bold]● Active[/bold] = in your profile   [dim]○ Available[/dim] = add with [bold]pubscout domains add <label> <query>[/bold]")
 
 
 # ── config ───────────────────────────────────────────────────────────
