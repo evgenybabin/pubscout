@@ -334,16 +334,21 @@ def sources_add(ctx: click.Context, url: str, name: str | None, src_type: str | 
 @click.argument("label")
 @click.pass_context
 def sources_remove(ctx: click.Context, label: str) -> None:
-    """Remove a source by label."""
+    """Remove a source by label (case-insensitive, partial match on label or URL)."""
     user_profile, profile_path = _load_or_exit(ctx.obj.get("profile_opt"))
-    original_count = len(user_profile.sources)
-    user_profile.sources = [s for s in user_profile.sources if s.label != label]
-    if len(user_profile.sources) == original_count:
+    needle = label.lower()
+    matched = [s for s in user_profile.sources if needle in s.label.lower() or needle in s.url.lower()]
+    if not matched:
         console.print(f"[red]Source '{label}' not found[/red]")
+        labels = [s.label for s in user_profile.sources]
+        if labels:
+            console.print(f"  Available: {', '.join(labels)}")
         return
-    if click.confirm(f"Remove source '{label}'?", default=True):
+    target = matched[0]
+    if click.confirm(f"Remove source '{target.label}' ({target.url})?", default=True):
+        user_profile.sources = [s for s in user_profile.sources if s is not target]
         save_profile(user_profile, profile_path)
-        console.print(f"[green]✓ Removed source: {label}[/green]")
+        console.print(f"[green]✓ Removed source: {target.label}[/green]")
 
 
 @sources.command("test")
@@ -506,15 +511,21 @@ def domains_add(ctx: click.Context, label: str, query: str) -> None:
 @click.argument("label")
 @click.pass_context
 def domains_remove(ctx: click.Context, label: str) -> None:
-    """Remove a domain by label."""
+    """Remove a domain by label (case-insensitive, partial match)."""
     user_profile, profile_path = _load_or_exit(ctx.obj.get("profile_opt"))
-    original = len(user_profile.domains)
-    user_profile.domains = [d for d in user_profile.domains if d.label != label]
-    if len(user_profile.domains) == original:
+    needle = label.lower()
+    matched = [d for d in user_profile.domains if needle in d.label.lower()]
+    if not matched:
         console.print(f"[red]Domain '{label}' not found[/red]")
+        labels = [d.label for d in user_profile.domains]
+        if labels:
+            console.print(f"  Available: {', '.join(labels)}")
         return
-    save_profile(user_profile, profile_path)
-    console.print(f"[green]✓ Removed domain: {label}[/green]")
+    target = matched[0]
+    if click.confirm(f"Remove domain '{target.label}'?", default=True):
+        user_profile.domains = [d for d in user_profile.domains if d is not target]
+        save_profile(user_profile, profile_path)
+        console.print(f"[green]✓ Removed domain: {target.label}[/green]")
 
 
 @domains.command("enable")

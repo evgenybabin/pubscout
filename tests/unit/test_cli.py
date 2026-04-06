@@ -225,7 +225,7 @@ def test_domains_add_and_remove(runner, isolated_env):
     assert result.exit_code == 0
     assert "Added domain" in result.output
 
-    result = runner.invoke(cli, ["domains", "remove", "TestDomain"])
+    result = runner.invoke(cli, ["domains", "remove", "TestDomain"], input="y\n")
     assert result.exit_code == 0
     assert "Removed" in result.output
 
