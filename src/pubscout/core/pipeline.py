@@ -20,6 +20,14 @@ from pubscout.storage.database import PubScoutDB
 
 logger = logging.getLogger(__name__)
 
+
+def _aware(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (assume UTC if naive)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ── Adapter Registry ─────────────────────────────────────────────────
 
 ADAPTER_REGISTRY: dict[str, type] = {
@@ -95,7 +103,7 @@ class ScanPipeline:
         before_filter = len(all_publications)
         all_publications = [
             p for p in all_publications
-            if p.publication_date is None or p.publication_date >= cutoff
+            if p.publication_date is None or _aware(p.publication_date) >= cutoff
         ]
         filtered_out = before_filter - len(all_publications)
         if filtered_out:
