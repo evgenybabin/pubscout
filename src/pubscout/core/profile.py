@@ -102,6 +102,42 @@ DEFAULT_SOURCES = [
             "api_key_env": "S2_API_KEY",
         },
     ),
+    Source(
+        label="ACL Anthology",
+        type="rss",
+        url="https://aclanthology.org/papers/index.xml",
+        adapter="rss",
+        enabled=True,
+        default=True,
+        config={},
+    ),
+    Source(
+        label="PapersWithCode",
+        type="web",
+        url="https://paperswithcode.com",
+        adapter="web",
+        enabled=True,
+        default=True,
+        config={},
+    ),
+    Source(
+        label="OpenReview",
+        type="web",
+        url="https://openreview.net",
+        adapter="web",
+        enabled=True,
+        default=True,
+        config={},
+    ),
+    Source(
+        label="Microsoft Research Blog",
+        type="web",
+        url="https://www.microsoft.com/en-us/research/blog/",
+        adapter="web",
+        enabled=True,
+        default=True,
+        config={},
+    ),
 ]
 
 _PROFILE_DIR = ".pubscout"
