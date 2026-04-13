@@ -23,10 +23,14 @@ class TestCreateDefaultProfile:
 
     def test_returns_valid_profile_with_default_sources(self) -> None:
         profile = create_default_profile()
-        assert len(profile.sources) == 2
+        assert len(profile.sources) == 6
         labels = {s.label for s in profile.sources}
         assert "arXiv" in labels
         assert "Semantic Scholar" in labels
+        assert "ACL Anthology" in labels
+        assert "PapersWithCode" in labels
+        assert "OpenReview" in labels
+        assert "Microsoft Research Blog" in labels
 
     def test_all_default_domains_are_enabled(self) -> None:
         profile = create_default_profile()
