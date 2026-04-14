@@ -15,7 +15,6 @@ PubScout automates the tedious work of staying current with research. Define you
 2. **Deduplicate** results across sources using fuzzy title matching + DOI/arXiv ID
 3. **Score** relevance using an LLM (GPT-4o-mini by default) against your domain queries
 4. **Report** top results as an HTML digest — delivered by email or saved to file
-5. **Learn** from your feedback to improve future scoring
 
 ---
 
@@ -238,16 +237,16 @@ pubscout email test                   # Send a test email to verify SMTP config
 
 Email requires SMTP configuration in the profile. Set `transport: smtp` and configure host, port, and credentials. The password is read from an environment variable (not stored in the profile).
 
-### `pubscout feedback` — Relevance Feedback
+### `pubscout feedback` — Relevance Feedback (CLI)
 
 ```bash
 pubscout feedback list                       # Show recent feedback entries
 pubscout feedback record PUB_ID up           # Positive feedback
 pubscout feedback record PUB_ID down         # Negative feedback
-pubscout feedback import feedback.json       # Import feedback from HTML report export
+pubscout feedback import feedback.json       # Import feedback from JSON file
 ```
 
-The HTML report includes inline 👍/👎 buttons per paper. Clicks are stored in your browser's `localStorage` and can be exported as a JSON file via the floating "Save feedback.json" bar. Import the file with `pubscout feedback import` to persist ratings in SQLite for future scoring improvement. No server required — everything works offline.
+Feedback is stored in the local SQLite database and used by the LLM scorer as context for future scans. The CLI commands allow programmatic feedback recording and bulk import.
 
 ### `pubscout history` — Scan History
 
@@ -286,16 +285,18 @@ src/pubscout/
 │   ├── rss_adapter.py    #   RSS/Atom feed adapter
 │   └── web_adapter.py    #   Generic web scraper
 ├── cli/
-│   └── main.py           # Click CLI with 11 command groups
+│   └── main.py           # Click CLI with 12 command groups
 ├── core/
 │   ├── dedup.py          # Fuzzy deduplication (DOI → arXiv ID → title similarity)
 │   ├── email.py          # SMTP email sender (STARTTLS/SSL)
 │   ├── models.py         # Pydantic models (UserProfile, Source, Domain, etc.)
 │   ├── pipeline.py       # Orchestrator: fetch → dedup → date filter → score → report → email
 │   ├── profile.py        # Profile YAML I/O + v1→v2 migration
+│   ├── protocol.py       # pubscout:// URL protocol handler (feedback)
 │   ├── query.py          # Boolean query parser
 │   ├── report.py         # Jinja2 HTML report generator
 │   ├── scorer.py         # LLM-based relevance scoring (OpenAI + Azure OpenAI)
+│   ├── server.py         # Local HTTP feedback server (optional)
 │   └── source_detect.py  # URL auto-detection (RSS vs web vs API)
 └── storage/
     └── database.py       # SQLite: publications, scan runs, feedback, stats
@@ -304,10 +305,10 @@ src/pubscout/
 **Data flow:**
 
 ```
-Sources ──→ Adapters ──→ Dedup ──→ Scorer ──→ Reporter ──→ Email
 Sources → Adapters → Date Filter (N days) → Dedup → Scorer → Reporter → Email
-                                            │                    │
-                                         SQLite ← Feedback (localStorage → JSON → import)
+                                              │                  │
+                                           SQLite ←──────────────┘
+```
 
 ---
 
