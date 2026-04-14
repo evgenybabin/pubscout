@@ -8,11 +8,18 @@ import os
 import re
 
 from openai import OpenAI
+from rapidfuzz import fuzz
 
 from pubscout.core.models import Domain, LLMConfig, Publication, ScoringConfig
 from pubscout.core.query import matches, parse_query
 
 logger = logging.getLogger(__name__)
+
+# Maximum feedback-based adjustment to the keyword heuristic score
+_FEEDBACK_BOOST = 1.5
+_FEEDBACK_PENALTY = 1.5
+# Minimum fuzzy similarity (0-100) to consider a feedback match
+_FEEDBACK_SIMILARITY_THRESHOLD = 55
 
 
 class RelevanceScorer:
@@ -31,13 +38,16 @@ class RelevanceScorer:
         domains: list[Domain],
         feedback_positive: list[Publication] | None = None,
         feedback_negative: list[Publication] | None = None,
+        domain_threshold_adjustments: dict[str, float] | None = None,
     ) -> list[Publication]:
         """Two-pass scoring pipeline.
 
         1. Keyword pre-filter via domain boolean queries.
-        2. LLM scoring with feedback context.
+        2. LLM scoring with feedback context (falls back to keyword
+           heuristic + feedback similarity when LLM is unavailable).
         3. Hard keyword filters (exclude / include penalty).
-        4. Threshold filter + sort by score descending.
+        4. Threshold filter + sort by score descending.  Per-domain
+           threshold adjustments from feedback history are applied here.
         """
         # Pass 1 — keyword pre-filter
         candidates = self._keyword_prefilter(publications, domains)
@@ -56,9 +66,24 @@ class RelevanceScorer:
             if result is not None:
                 scored.append(result)
 
-        # Pass 4 — threshold filter + sort
-        threshold = self.scoring_config.threshold
-        filtered = [p for p in scored if p.relevance_score is not None and p.relevance_score >= threshold]
+        # Pass 4 — threshold filter + sort (with per-domain adjustments)
+        base_threshold = self.scoring_config.threshold
+        adjustments = domain_threshold_adjustments or {}
+        filtered: list[Publication] = []
+        for p in scored:
+            if p.relevance_score is None:
+                continue
+            # Effective threshold: use the tightest (highest) per-domain adjustment
+            if p.matched_domains and adjustments:
+                domain_thresholds = [
+                    base_threshold + adjustments.get(d, 0.0)
+                    for d in p.matched_domains
+                ]
+                effective_threshold = min(domain_thresholds)
+            else:
+                effective_threshold = base_threshold
+            if p.relevance_score >= effective_threshold:
+                filtered.append(p)
         filtered.sort(key=lambda p: p.relevance_score or 0.0, reverse=True)
         return filtered
 
@@ -156,7 +181,51 @@ class RelevanceScorer:
                 "LLM scoring failed for '%s'; falling back to keyword heuristic",
                 pub.title,
             )
-            return min(len(pub.matched_domains) * 2.0, 10.0)
+            return self._keyword_heuristic_score(
+                pub, positive_examples, negative_examples,
+            )
+
+    def _keyword_heuristic_score(
+        self,
+        pub: Publication,
+        positive_titles: list[str] | None = None,
+        negative_titles: list[str] | None = None,
+    ) -> float:
+        """Score using domain-count heuristic + feedback similarity boost.
+
+        Base score = matched_domains * 2.0 (capped at 10).
+        Then adjust using fuzzy title similarity against feedback examples.
+        """
+        base = min(len(pub.matched_domains) * 2.0, 10.0)
+
+        if not positive_titles and not negative_titles:
+            return base
+
+        text = pub.title.lower()
+        boost = 0.0
+
+        # Positive feedback — boost for similar titles
+        if positive_titles:
+            best_pos = max(
+                fuzz.token_sort_ratio(text, t.lower()) for t in positive_titles
+            )
+            if best_pos >= _FEEDBACK_SIMILARITY_THRESHOLD:
+                # Scale: 55→0.0, 100→_FEEDBACK_BOOST
+                boost += _FEEDBACK_BOOST * (best_pos - _FEEDBACK_SIMILARITY_THRESHOLD) / (
+                    100 - _FEEDBACK_SIMILARITY_THRESHOLD
+                )
+
+        # Negative feedback — penalize for similar titles
+        if negative_titles:
+            best_neg = max(
+                fuzz.token_sort_ratio(text, t.lower()) for t in negative_titles
+            )
+            if best_neg >= _FEEDBACK_SIMILARITY_THRESHOLD:
+                boost -= _FEEDBACK_PENALTY * (best_neg - _FEEDBACK_SIMILARITY_THRESHOLD) / (
+                    100 - _FEEDBACK_SIMILARITY_THRESHOLD
+                )
+
+        return max(0.0, min(10.0, base + boost))
 
     def _build_scoring_prompt(
         self,

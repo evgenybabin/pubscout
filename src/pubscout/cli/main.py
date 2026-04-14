@@ -79,7 +79,16 @@ def init(non_interactive: bool, sources_file: str | None) -> None:
     console.print(f"\n[green]✓ Profile created at {profile_path}[/green]")
     console.print(f"  Domains: {len(profile.domains)} configured")
     console.print(f"  Sources: {len(profile.sources)} configured")
-    console.print("\n[bold]Next: pubscout scan --dry-run[/bold]")
+
+    # Auto-register protocol handler for instant feedback
+    from pubscout.core.protocol import register_protocol
+
+    if register_protocol():
+        console.print("  [green]✓ pubscout:// protocol registered — feedback buttons work instantly[/green]")
+    else:
+        console.print("  [yellow]⚠ Protocol registration failed — use 'pubscout serve' for feedback[/yellow]")
+
+    console.print("\n[bold]Next: pubscout scan --dry-run --first-run[/bold]")
 
 
 def _interactive_init(sources_file: str | None) -> "UserProfile":
@@ -955,3 +964,80 @@ def schedule_show() -> None:
     else:
         console.print("[bold]Cron (Linux/macOS):[/bold]")
         console.print("  0 8 * * * pubscout scan")
+
+
+# ── serve ────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("--port", default=8585, help="Port to listen on (default: 8585)")
+def serve(port: int) -> None:
+    """Start local server for live report viewing and feedback.
+
+    Opens the latest report in your browser.  Every thumbs-up/down click
+    in the report is saved to the database instantly — no export/import
+    needed.
+
+    The server runs at http://localhost:PORT until you press Ctrl+C.
+    """
+    import webbrowser
+
+    from pubscout.core.server import run_server
+
+    db = PubScoutDB()
+    console.print(f"[bold]Starting PubScout feedback server on port {port}...[/bold]")
+    webbrowser.open(f"http://localhost:{port}")
+    run_server(port=port, db=db)
+
+
+# ── protocol ─────────────────────────────────────────────────────────
+
+
+@cli.command("protocol-handle", hidden=True)
+@click.argument("url")
+def protocol_handle(url: str) -> None:
+    """Handle a pubscout:// URL (called by the OS, not by users)."""
+    from pubscout.core.protocol import handle_url
+
+    result = handle_url(url)
+    if "error" in result:
+        logging.getLogger(__name__).error("Protocol handler error: %s", result["error"])
+    else:
+        logging.getLogger(__name__).info(
+            "Feedback: %s → %s", result["publication_id"][:8], result["signal"],
+        )
+
+
+@cli.group()
+def protocol() -> None:
+    """Manage the pubscout:// URL protocol handler."""
+
+
+@protocol.command("register")
+def protocol_register() -> None:
+    """Register pubscout:// URL scheme so feedback buttons write to DB directly.
+
+    After registration, clicking thumbs-up/down in any PubScout report
+    saves feedback to the database instantly — no server needed, no file
+    export needed.  Run this once after install.
+    """
+    from pubscout.core.protocol import register_protocol
+
+    if register_protocol():
+        console.print("[green]✓ pubscout:// protocol registered[/green]")
+        console.print(
+            "[dim]Feedback buttons in reports will now save directly to the database.[/dim]"
+        )
+    else:
+        console.print("[red]✗ Failed to register protocol. See logs for details.[/red]")
+
+
+@protocol.command("unregister")
+def protocol_unregister() -> None:
+    """Remove the pubscout:// URL scheme registration."""
+    from pubscout.core.protocol import unregister_protocol
+
+    if unregister_protocol():
+        console.print("[green]✓ pubscout:// protocol unregistered[/green]")
+    else:
+        console.print("[red]✗ Failed to unregister protocol.[/red]")
