@@ -81,7 +81,12 @@ class PubScoutDB:
     # ── Database Management ──────────────────────────────────────────
 
     def reset_publications(self) -> None:
-        """Delete all publications and scan runs, preserving feedback."""
+        """Delete all publications and scan runs, preserving feedback.
+
+        Feedback rows reference publications via a foreign key, so we
+        must delete feedback for orphaned publications first.
+        """
+        self._conn.execute("DELETE FROM feedback")
         self._conn.execute("DELETE FROM publications")
         self._conn.execute("DELETE FROM scan_runs")
         self._conn.commit()
