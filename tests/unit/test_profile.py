@@ -17,9 +17,9 @@ from pubscout.core.profile import (
 class TestCreateDefaultProfile:
     """Validate the factory-default profile."""
 
-    def test_returns_valid_profile_with_six_domains(self) -> None:
+    def test_returns_valid_profile_with_seven_domains(self) -> None:
         profile = create_default_profile()
-        assert len(profile.domains) == 6
+        assert len(profile.domains) == 7
 
     def test_returns_valid_profile_with_default_sources(self) -> None:
         profile = create_default_profile()
@@ -41,7 +41,7 @@ class TestCreateDefaultProfile:
         profile = create_default_profile()
         arxiv = profile.sources[0]
         assert arxiv.label == "arXiv"
-        expected = ["cs.LG", "cs.AI", "cs.DC", "cs.PF", "cs.AR", "cs.CL"]
+        expected = ["cs.LG", "cs.AI", "cs.DC", "cs.PF", "cs.AR", "cs.CL", "cs.SC", "cs.NE"]
         assert arxiv.config is not None
         assert arxiv.config["categories"] == expected
 

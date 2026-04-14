@@ -72,6 +72,13 @@ DEFAULT_DOMAINS = [
             '("reinforcement learning" OR "RL-based" OR "learned code generation")'
         ),
     ),
+    Domain(
+        label="Symbolic & Scientific Computing",
+        query=(
+            '("symbolic regression" OR "symbolic computation" OR "scientific computing") AND '
+            '("neural" OR "gradient" OR "machine learning" OR "deep learning" OR LLM OR transformer)'
+        ),
+    ),
 ]
 
 DEFAULT_SOURCES = [
@@ -83,7 +90,7 @@ DEFAULT_SOURCES = [
         enabled=True,
         default=True,
         config={
-            "categories": ["cs.LG", "cs.AI", "cs.DC", "cs.PF", "cs.AR", "cs.CL"],
+            "categories": ["cs.LG", "cs.AI", "cs.DC", "cs.PF", "cs.AR", "cs.CL", "cs.SC", "cs.NE"],
             "max_results_per_query": 100,
             "rate_limit_seconds": 3,
             "lookback_hours": 24,
