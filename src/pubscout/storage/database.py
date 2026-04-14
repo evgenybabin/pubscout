@@ -267,6 +267,30 @@ class PubScoutDB:
 
     # ── Aggregate Stats ─────────────────────────────────────────────
 
+    def get_domain_feedback_rates(self) -> dict[str, dict[str, int]]:
+        """Return per-domain feedback counts: {domain: {positive: N, negative: N}}.
+
+        Joins feedback with publications via matched_domains JSON field.
+        Used by the scorer to compute per-domain threshold adjustments.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT p.matched_domains, f.signal
+            FROM feedback f
+            JOIN publications p ON f.publication_id = p.id
+            """
+        ).fetchall()
+
+        rates: dict[str, dict[str, int]] = {}
+        for r in rows:
+            domains = json.loads(r[0]) if r[0] else []
+            signal = r[1]
+            for d in domains:
+                if d not in rates:
+                    rates[d] = {"positive": 0, "negative": 0}
+                rates[d][signal] = rates[d].get(signal, 0) + 1
+        return rates
+
     def count_publications(self, since: str | None = None) -> int:
         if since:
             row = self._conn.execute(

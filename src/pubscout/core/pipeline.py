@@ -124,11 +124,16 @@ class ScanPipeline:
         # Step 3 — Score
         positive_examples = self.db.get_positive_examples(limit=20)
         negative_examples = self.db.get_negative_examples(limit=20)
+
+        # Compute per-domain threshold adjustments from feedback history
+        domain_threshold_adjustments = self._compute_threshold_adjustments()
+
         scored_pubs = self.scorer.score_publications(
             unique_pubs,
             enabled_domains,
             feedback_positive=positive_examples,
             feedback_negative=negative_examples,
+            domain_threshold_adjustments=domain_threshold_adjustments,
         )
         items_scored = len(scored_pubs)
         logger.info("After scoring: %d publications above threshold", items_scored)
@@ -170,6 +175,43 @@ class ScanPipeline:
         return scan_run
 
     # ── private helpers ──────────────────────────────────────
+
+    # Maximum per-domain threshold shift from feedback
+    _MAX_THRESHOLD_SHIFT = 2.0
+    # Minimum feedback count before adjustments kick in
+    _MIN_FEEDBACK_COUNT = 3
+
+    def _compute_threshold_adjustments(self) -> dict[str, float]:
+        """Compute per-domain threshold adjustments from feedback history.
+
+        Domains with mostly negative feedback get a positive adjustment
+        (higher threshold = stricter).  Domains with mostly positive
+        feedback get a negative adjustment (lower threshold = more
+        permissive).  Returns ``{domain_label: adjustment}`` (can be
+        positive or negative).  Requires at least ``_MIN_FEEDBACK_COUNT``
+        signals before adjusting.
+        """
+        rates = self.db.get_domain_feedback_rates()
+        adjustments: dict[str, float] = {}
+
+        for domain, counts in rates.items():
+            total = counts.get("positive", 0) + counts.get("negative", 0)
+            if total < self._MIN_FEEDBACK_COUNT:
+                continue
+
+            positive_rate = counts.get("positive", 0) / total
+            # positive_rate 1.0 → lower threshold by MAX_SHIFT (surface more)
+            # positive_rate 0.0 → raise threshold by MAX_SHIFT (filter more)
+            # positive_rate 0.5 → no adjustment (balanced)
+            adjustment = self._MAX_THRESHOLD_SHIFT * (0.5 - positive_rate)
+            if abs(adjustment) > 0.1:
+                adjustments[domain] = round(adjustment, 2)
+                logger.info(
+                    "Threshold adjustment for '%s': %+.1f (positive rate: %.0f%%)",
+                    domain, adjustment, positive_rate * 100,
+                )
+
+        return adjustments
 
     def _get_adapter(self, source: Any) -> Any:
         """Return the adapter instance for *source.adapter* from the registry."""
