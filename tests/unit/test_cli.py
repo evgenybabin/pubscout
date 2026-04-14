@@ -115,7 +115,7 @@ def test_scan_no_email_flag(runner, isolated_env, monkeypatch):
 
     result = runner.invoke(cli, ["scan", "--no-email"])
     assert result.exit_code == 0
-    mock_pipeline.run.assert_called_once_with(dry_run=False, send_email=False, scan_range_days=None)
+    mock_pipeline.run.assert_called_once_with(dry_run=False, send_email=False, scan_range_days=None, first_run=False)
 
 
 # ── sources ──────────────────────────────────────────────────────────

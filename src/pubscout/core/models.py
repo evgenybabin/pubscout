@@ -50,10 +50,12 @@ class EmailConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider settings for relevance scoring."""
 
-    provider: str = "openai"
+    provider: str = "openai"  # "openai" or "azure"
     model: str = "gpt-4o-mini"
     api_key: str | None = None
     endpoint: str | None = None
+    api_version: str | None = None  # Azure OpenAI API version
+    deployment_name: str | None = None  # Azure deployment name
 
 
 class ScoringConfig(BaseModel):

@@ -78,6 +78,14 @@ class PubScoutDB:
     def close(self) -> None:
         self._conn.close()
 
+    # ── Database Management ──────────────────────────────────────────
+
+    def reset_publications(self) -> None:
+        """Delete all publications and scan runs, preserving feedback."""
+        self._conn.execute("DELETE FROM publications")
+        self._conn.execute("DELETE FROM scan_runs")
+        self._conn.commit()
+
     # ── Publications ─────────────────────────────────────────────────
 
     def save_publication(self, pub: Publication) -> None:
