@@ -83,7 +83,7 @@ sources:
     adapter: arxiv
     enabled: true
     config:
-      categories: [cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL]
+      categories: [cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL, cs.SC, cs.NE]
       lookback_days: 1
 email:
   transport: smtp          # "smtp" or "file"
@@ -318,7 +318,7 @@ PubScout ships with 6 pre-configured sources:
 
 | Source | Type | Adapter | Description |
 |---|---|---|---|
-| arXiv | API | `arxiv` | arXiv API with category filtering (cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL) |
+| arXiv | API | `arxiv` | arXiv API with category filtering (cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL, cs.SC, cs.NE) |
 | Semantic Scholar | API | `semantic_scholar` | Semantic Scholar API with rate limiting |
 | ACL Anthology | RSS | `rss` | ACL Anthology publications feed |
 | PapersWithCode | Web | `web` | Trending papers from Papers With Code |
@@ -331,7 +331,7 @@ These can be customized via `pubscout sources add/remove` or by editing `profile
 
 ## Default Research Domains
 
-PubScout ships with 6 pre-configured domains focused on LLM inference systems:
+PubScout ships with 7 pre-configured domains:
 
 | Domain | Query Focus |
 |---|---|
@@ -341,6 +341,7 @@ PubScout ships with 6 pre-configured domains focused on LLM inference systems:
 | Low-Precision & Quantization | FP8, BF16, INT8, quantization techniques |
 | Efficient Compute Kernels | Attention kernels, GEMM, FlashAttention |
 | RL-Based Code & Kernel Generation | Reinforcement learning for code generation |
+| Symbolic & Scientific Computing | Symbolic regression, scientific computing + ML |
 
 These can be fully customized via `pubscout domains add/remove` or by editing `profile.yaml`.
 
