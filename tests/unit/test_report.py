@@ -147,16 +147,14 @@ class TestGenerateHTML:
         assert ("A" * 200 + "...") in html
         assert ("A" * 201) not in html
 
-    def test_feedback_links(self, generator: ReportGenerator, scan_run: ScanRun):
+    def test_no_feedback_ui(self, generator: ReportGenerator, scan_run: ScanRun):
         pub = _pub()
         html = generator.generate_html([pub], scan_run)
-        # Local feedback: JS vote() handler, no server dependency
-        assert f"vote('{pub.id}','positive'" in html or f"vote(&#39;{pub.id}&#39;,&#39;positive&#39;" in html
-        assert "saveFeedback" in html
-        assert "localStorage" in html
-        # No server references
-        assert "localhost:8230" not in html
-        assert "Server offline" not in html
+        # Feedback UI removed — no vote buttons or JS handlers
+        assert "vote(" not in html
+        assert "saveFeedback" not in html
+        assert "fb-btn" not in html
+        assert "localStorage" not in html
 
     def test_score_color_coding(self, generator: ReportGenerator, scan_run: ScanRun):
         green_pub = _pub(title="Green Paper", relevance_score=8.5)
