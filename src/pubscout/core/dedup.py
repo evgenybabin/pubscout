@@ -26,13 +26,18 @@ class Deduplicator:
 
     # ── Public API ───────────────────────────────────────────────────
 
-    def deduplicate(self, publications: list[Publication]) -> list[Publication]:
+    def deduplicate(
+        self,
+        publications: list[Publication],
+        skip_db_dedup: bool = False,
+    ) -> list[Publication]:
         """Remove duplicates from a batch of publications.
 
         Dedup strategy (spec: FR-004):
         1. Remove duplicates within the batch (same arxiv_id, same DOI,
            or title similarity > 90%).
-        2. Remove publications already in the database.
+        2. Remove publications already in the database (skipped when
+           *skip_db_dedup* is ``True``, e.g. ``--first-run`` mode).
 
         When merging duplicates, combine ``matched_domains`` lists.
         Returns a deduplicated list preserving the original order.
@@ -48,11 +53,15 @@ class Deduplicator:
         if batch_removed:
             logger.info("Batch dedup removed %d duplicate(s)", batch_removed)
 
-        # Stage 2 – database dedup
-        result = [pub for pub in batch_deduped if not self._is_duplicate_in_db(pub)]
-        db_removed = len(batch_deduped) - len(result)
-        if db_removed:
-            logger.info("Database dedup removed %d duplicate(s)", db_removed)
+        # Stage 2 – database dedup (skipped in first-run mode)
+        if skip_db_dedup:
+            logger.info("Database dedup skipped (first-run mode)")
+            result = batch_deduped
+        else:
+            result = [pub for pub in batch_deduped if not self._is_duplicate_in_db(pub)]
+            db_removed = len(batch_deduped) - len(result)
+            if db_removed:
+                logger.info("Database dedup removed %d duplicate(s)", db_removed)
 
         logger.info(
             "Deduplication complete: %d → %d publications (%d removed)",

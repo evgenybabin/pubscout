@@ -39,14 +39,17 @@ pip install -e .
 # Interactive setup — walks you through domains, sources, email, and LLM config
 pubscout init
 
-# Or non-interactive with defaults (arXiv + Semantic Scholar, 6 research domains)
+# Or non-interactive with defaults (6 sources, 6 research domains)
 pubscout init --non-interactive
 ```
 
 ### Run Your First Scan
 
 ```bash
-# Dry run — generates report to file, no email
+# First scan — show all matching papers (skip database dedup)
+pubscout scan --dry-run --first-run
+
+# Subsequent scans — only new papers since last run
 pubscout scan --dry-run
 
 # Full scan with email delivery
@@ -93,20 +96,49 @@ email:
   smtp_username: you@example.com
   smtp_password_env: PUBSCOUT_SMTP_PASS   # env var name, not the password
 llm:
-  provider: openai
+  provider: openai         # "openai" or "azure"
   model: gpt-4o-mini
   api_key: null            # uses OPENAI_API_KEY env var if null
+  # Azure OpenAI fields (only when provider: azure):
+  # endpoint: https://YOUR-RESOURCE.openai.azure.com
+  # api_version: "2024-06-01"
+  # deployment_name: your-deployment-name
 scoring:
   threshold: 5.0           # 1.0–10.0, papers below this are filtered out
   include_keywords: []     # boost score for papers containing these
   exclude_keywords: []     # penalize papers containing these
 ```
 
+### LLM Providers
+
+PubScout supports two LLM providers for relevance scoring:
+
+**OpenAI (default):**
+```yaml
+llm:
+  provider: openai
+  model: gpt-4o-mini
+```
+Set `OPENAI_API_KEY` environment variable or `api_key` in profile.
+
+**Azure OpenAI:**
+```yaml
+llm:
+  provider: azure
+  model: gpt-4o-mini
+  deployment_name: my-gpt4o-mini    # Your Azure deployment name
+  endpoint: https://MY-RESOURCE.openai.azure.com
+  api_version: "2024-06-01"
+```
+Set `AZURE_OPENAI_API_KEY` environment variable or `api_key` in profile. The `deployment_name` is used as the model parameter in API calls. Get the endpoint and key from Azure Portal → your OpenAI resource → Keys and Endpoint.
+
 ### Environment Variables
 
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key for LLM scoring |
+| `OPENAI_API_KEY` | OpenAI API key for LLM scoring (provider: openai) |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key (provider: azure) |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint (provider: azure) |
 | `S2_API_KEY` | Semantic Scholar API key (optional, increases rate limits) |
 | `PUBSCOUT_SMTP_PASS` | SMTP password (env var name is configurable in profile) |
 
@@ -128,17 +160,20 @@ pubscout init --sources-file urls.txt  # Import source URLs from file
 pubscout scan                       # Full scan + email
 pubscout scan --dry-run             # Report to file only
 pubscout scan --no-email            # Scan + save, skip email
+pubscout scan --first-run           # Show all papers (skip database dedup)
 pubscout scan --days 14             # Override scan range (default: 7 days from profile)
 pubscout scan --timeout 60          # Custom HTTP timeout per source
 pubscout scan -p custom-profile.yaml  # Use a different profile
 ```
+
+Use `--first-run` on your initial scan to see all matching papers. Subsequent scans automatically show only new publications since the last run.
 
 ### `pubscout sources` — Manage Sources
 
 ```bash
 pubscout sources                      # List all sources
 pubscout sources add URL              # Add a URL (auto-detects type)
-pubscout sources add URL --label "My Feed" --adapter rss
+pubscout sources add URL --name "My Feed" --type rss
 pubscout sources remove "My Feed"     # Remove by label
 pubscout sources enable "My Feed"     # Enable a disabled source
 pubscout sources disable "My Feed"    # Disable without removing
@@ -185,6 +220,15 @@ pubscout config include-remove "transformer"
 pubscout config exclude-add "survey"        # Penalize papers with this keyword
 pubscout config exclude-remove "survey"
 ```
+
+### `pubscout db` — Database Management
+
+```bash
+pubscout db reset                     # Clear publications + scan history (preserves feedback)
+pubscout db reset --yes               # Skip confirmation prompt
+```
+
+Use `db reset` when you want the next scan to treat every paper as new, without losing your feedback history.
 
 ### `pubscout email` — Email Delivery
 
@@ -242,7 +286,7 @@ src/pubscout/
 │   ├── rss_adapter.py    #   RSS/Atom feed adapter
 │   └── web_adapter.py    #   Generic web scraper
 ├── cli/
-│   └── main.py           # Click CLI with 10 command groups
+│   └── main.py           # Click CLI with 11 command groups
 ├── core/
 │   ├── dedup.py          # Fuzzy deduplication (DOI → arXiv ID → title similarity)
 │   ├── email.py          # SMTP email sender (STARTTLS/SSL)
@@ -251,7 +295,7 @@ src/pubscout/
 │   ├── profile.py        # Profile YAML I/O + v1→v2 migration
 │   ├── query.py          # Boolean query parser
 │   ├── report.py         # Jinja2 HTML report generator
-│   ├── scorer.py         # LLM-based relevance scoring
+│   ├── scorer.py         # LLM-based relevance scoring (OpenAI + Azure OpenAI)
 │   └── source_detect.py  # URL auto-detection (RSS vs web vs API)
 └── storage/
     └── database.py       # SQLite: publications, scan runs, feedback, stats
@@ -264,6 +308,23 @@ Sources ──→ Adapters ──→ Dedup ──→ Scorer ──→ Reporter �
 Sources → Adapters → Date Filter (N days) → Dedup → Scorer → Reporter → Email
                                             │                    │
                                          SQLite ← Feedback (localStorage → JSON → import)
+
+---
+
+## Default Sources
+
+PubScout ships with 6 pre-configured sources:
+
+| Source | Type | Adapter | Description |
+|---|---|---|---|
+| arXiv | API | `arxiv` | arXiv API with category filtering (cs.LG, cs.AI, cs.DC, cs.PF, cs.AR, cs.CL) |
+| Semantic Scholar | API | `semantic_scholar` | Semantic Scholar API with rate limiting |
+| ACL Anthology | RSS | `rss` | ACL Anthology publications feed |
+| PapersWithCode | Web | `web` | Trending papers from Papers With Code |
+| OpenReview | Web | `web` | Conference submissions (limited by robots.txt) |
+| Microsoft Research Blog | Web | `web` | Microsoft Research blog posts |
+
+These can be customized via `pubscout sources add/remove` or by editing `profile.yaml`.
 
 ---
 
@@ -293,6 +354,8 @@ PubScout uses SQLite at `~/.pubscout/pubscout.db` to persist:
 - **Feedback** — user signals (positive/negative) per publication
 
 The database is created automatically on first scan. No external database server needed.
+
+Use `pubscout db reset` to clear publications and scan history while preserving feedback. This is useful when you want to re-scan without dedup filtering, or to start fresh after changing domains or sources.
 
 ---
 

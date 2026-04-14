@@ -207,8 +207,9 @@ def _interactive_init(sources_file: str | None) -> "UserProfile":
 @click.option("--no-email", is_flag=True, help="Skip email delivery")
 @click.option("--days", type=int, default=None, help="Scan range in days (default: from profile, typically 7)")
 @click.option("--timeout", type=int, default=30, help="HTTP timeout per source (seconds)")
+@click.option("--first-run", is_flag=True, help="Show all papers, skip database dedup (ideal for first scan)")
 @click.option("--profile", "-p", type=click.Path(exists=True), help="Path to profile.yaml")
-def scan(dry_run: bool, no_email: bool, days: int | None, timeout: int, profile: str | None) -> None:
+def scan(dry_run: bool, no_email: bool, days: int | None, timeout: int, first_run: bool, profile: str | None) -> None:
     """Run a publication scan."""
     user_profile, _ = _load_or_exit(profile)
 
@@ -219,12 +220,19 @@ def scan(dry_run: bool, no_email: bool, days: int | None, timeout: int, profile:
 
     effective_days = days if days is not None else user_profile.scan_range_days
     console.print(f"[dim]Scan range: last {effective_days} day(s)[/dim]")
+    if first_run:
+        console.print("[cyan]First-run mode: database dedup disabled — showing all matching papers[/cyan]")
 
     db = PubScoutDB()
     pipeline = ScanPipeline(user_profile, db)
 
     console.print("[bold]Starting scan...[/bold]")
-    scan_run = pipeline.run(dry_run=dry_run, send_email=not no_email, scan_range_days=days)
+    scan_run = pipeline.run(
+        dry_run=dry_run,
+        send_email=not no_email,
+        scan_range_days=days,
+        first_run=first_run,
+    )
 
     console.print()
     table = Table(title="Scan Results")
@@ -245,6 +253,36 @@ def scan(dry_run: bool, no_email: bool, days: int | None, timeout: int, profile:
             "[dim]Rate papers with 👍/👎 in the report, then save & import:[/dim]\n"
             "[dim]  pubscout feedback import feedback.json[/dim]"
         )
+
+
+# ── db ───────────────────────────────────────────────────────────────
+
+
+@cli.group()
+def db() -> None:
+    """Manage the PubScout database."""
+
+
+@db.command("reset")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def db_reset(yes: bool) -> None:
+    """Reset the publications database.
+
+    Removes all stored publications and scan history so the next scan
+    treats every paper as new.  Feedback data is preserved.
+    """
+    if not yes:
+        if not click.confirm(
+            "This will delete all publications and scan history "
+            "(feedback is preserved). Continue?"
+        ):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+    database = PubScoutDB()
+    database.reset_publications()
+    console.print("[green]✓ Database reset — publications and scan history cleared[/green]")
+    console.print("[dim]Feedback data preserved. Next scan will show all matching papers.[/dim]")
 
 
 # ── sources ──────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 
 from openai import OpenAI
@@ -91,14 +92,32 @@ class RelevanceScorer:
 
     @property
     def _openai_client(self) -> OpenAI:
-        """Lazy-init the OpenAI client."""
+        """Lazy-init the OpenAI or AzureOpenAI client."""
         if self._client is None:
-            kwargs: dict[str, str] = {}
-            if self.llm_config.api_key:
-                kwargs["api_key"] = self.llm_config.api_key
-            if self.llm_config.endpoint:
-                kwargs["base_url"] = self.llm_config.endpoint
-            self._client = OpenAI(**kwargs)
+            if self.llm_config.provider == "azure":
+                from openai import AzureOpenAI
+
+                api_key = (
+                    self.llm_config.api_key
+                    or os.environ.get("AZURE_OPENAI_API_KEY")
+                )
+                endpoint = (
+                    self.llm_config.endpoint
+                    or os.environ.get("AZURE_OPENAI_ENDPOINT")
+                )
+                api_version = self.llm_config.api_version or "2024-06-01"
+                self._client = AzureOpenAI(
+                    api_key=api_key,
+                    api_version=api_version,
+                    azure_endpoint=endpoint or "",
+                )
+            else:
+                kwargs: dict[str, str] = {}
+                if self.llm_config.api_key:
+                    kwargs["api_key"] = self.llm_config.api_key
+                if self.llm_config.endpoint:
+                    kwargs["base_url"] = self.llm_config.endpoint
+                self._client = OpenAI(**kwargs)
         return self._client
 
     @_openai_client.setter
@@ -119,8 +138,14 @@ class RelevanceScorer:
         prompt = self._build_scoring_prompt(pub, domains, positive_examples, negative_examples)
 
         try:
+            # Azure uses deployment_name; OpenAI uses model
+            model_name = (
+                self.llm_config.deployment_name or self.llm_config.model
+                if self.llm_config.provider == "azure"
+                else self.llm_config.model
+            )
             response = self._openai_client.chat.completions.create(
-                model=self.llm_config.model,
+                model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
             )

@@ -63,6 +63,7 @@ class ScanPipeline:
         dry_run: bool = False,
         send_email: bool = True,
         scan_range_days: int | None = None,
+        first_run: bool = False,
     ) -> ScanRun:
         """Execute the full pipeline and return a :class:`ScanRun` summary.
 
@@ -71,6 +72,8 @@ class ScanPipeline:
             send_email: Whether to send an email digest.
             scan_range_days: Override for the profile's ``scan_range_days``
                 (default: use the value from the user profile).
+            first_run: Skip database deduplication so all matching papers
+                appear regardless of scan history.
         """
         days = scan_range_days if scan_range_days is not None else self.profile.scan_range_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -113,7 +116,9 @@ class ScanPipeline:
             )
 
         # Step 2 — Deduplicate
-        unique_pubs = self.deduplicator.deduplicate(all_publications)
+        unique_pubs = self.deduplicator.deduplicate(
+            all_publications, skip_db_dedup=first_run,
+        )
         logger.info("After dedup: %d unique publications", len(unique_pubs))
 
         # Step 3 — Score
