@@ -955,3 +955,27 @@ def schedule_show() -> None:
     else:
         console.print("[bold]Cron (Linux/macOS):[/bold]")
         console.print("  0 8 * * * pubscout scan")
+
+
+# ── serve ────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("--port", default=8585, help="Port to listen on (default: 8585)")
+def serve(port: int) -> None:
+    """Start local server for live report viewing and feedback.
+
+    Opens the latest report in your browser.  Every thumbs-up/down click
+    in the report is saved to the database instantly — no export/import
+    needed.
+
+    The server runs at http://localhost:PORT until you press Ctrl+C.
+    """
+    import webbrowser
+
+    from pubscout.core.server import run_server
+
+    db = PubScoutDB()
+    console.print(f"[bold]Starting PubScout feedback server on port {port}...[/bold]")
+    webbrowser.open(f"http://localhost:{port}")
+    run_server(port=port, db=db)
